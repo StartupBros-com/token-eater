@@ -1,0 +1,98 @@
+# token-eater skill catalog
+#
+# Maps gate-verifiable chore archetypes to the skills that perform them. Chore-discovery
+# (U5) uses this to: DETECT an installed skill and use it; else SUGGEST a House of Vibe
+# drop-in (stubbed — not built yet); else fall back to token-eater's BUNDLED prompt.
+#
+# Only gate-verifiable code chores belong here. High-stakes work (bug hunts, deadlocks,
+# security audits) is deliberately excluded — it stays with Claude / a human, never a
+# cheap-model unsupervised run.
+#
+# entry fields:
+#   archetype       chore type
+#   tier            mechanical | standard | high | review-only
+#   gate            the deterministic gate that verifies this chore (or "none" = review-only)
+#   existing_skill  a skill already on this machine that does it (or null)
+#   detect          how to detect it: "claude-skill:<name>" | "grok-skill:<name>" | "cmd:<bin>"
+#                   (space-separated alternatives all count as present if any match)
+#   hov_dropin      the productized House of Vibe skill id to suggest when nothing is installed (or null)
+#   status          installed-or-bundled resolution is computed at runtime; this is the catalog default
+
+archetypes:
+  - archetype: formatter-idempotency
+    tier: mechanical
+    gate: "run formatter twice, diff must be empty"
+    existing_skill: null
+    detect: "cmd:prettier cmd:ruff cmd:biome cmd:gofmt"
+    hov_dropin: null
+    notes: "bundled — token-eater drives the formatter directly; safest starter chore"
+
+  - archetype: lint-autofix
+    tier: mechanical
+    gate: "linter exits clean"
+    existing_skill: null
+    detect: "cmd:ruff cmd:eslint cmd:biome cmd:clippy"
+    hov_dropin: null
+    notes: "bundled"
+
+  - archetype: dead-code-removal
+    tier: mechanical
+    gate: "tests + typecheck pass; removed symbols have no references"
+    existing_skill: ce-simplify-code
+    detect: "claude-skill:ce-simplify-code"
+    hov_dropin: hov-dead-code
+    notes: "validated end-to-end on marketplace-deal-sniper#4"
+
+  - archetype: isomorphic-simplify
+    tier: standard
+    gate: "full test suite passes unchanged (behavior preserved)"
+    existing_skill: simplify-and-refactor-code-isomorphically
+    detect: "claude-skill:simplify-and-refactor-code-isomorphically"
+    hov_dropin: hov-isomorphic-simplify
+    notes: "isomorphic = the tests ARE the gate"
+
+  - archetype: de-monolithize
+    tier: standard
+    gate: "full test suite passes unchanged"
+    existing_skill: de-monolithize-your-codebase-isomorphically
+    detect: "claude-skill:de-monolithize-your-codebase-isomorphically"
+    hov_dropin: hov-de-monolithize
+    notes: "split large modules without behavior change"
+
+  - archetype: mock-removal
+    tier: standard
+    gate: "tests pass with the mock removed or replaced"
+    existing_skill: mock-code-finder
+    detect: "claude-skill:mock-code-finder"
+    hov_dropin: hov-mock-removal
+    notes: "remove dead/placeholder mock code"
+
+  - archetype: optimize
+    tier: high
+    gate: "tests pass AND a perf benchmark is not regressed"
+    existing_skill: extreme-software-optimization
+    detect: "claude-skill:extreme-software-optimization"
+    hov_dropin: hov-optimize
+    notes: "riskier — needs a perf gate; high tier, off by default for unsupervised cheap-model runs"
+
+  - archetype: prose-deslop
+    tier: review-only
+    gate: "none — no machine gate; relies on the draft PR + frontier/human review"
+    existing_skill: de-slopify
+    detect: "claude-skill:de-slopify"
+    hov_dropin: hov-deslop
+    notes: "README/docs only; runs ONLY when the user opts into review-only mode (relaxes the deterministic-gate rule)"
+
+# House of Vibe drop-in registry — STUBBED. These productized skills are NOT built yet.
+# When an archetype above has no installed skill, token-eater suggests its hov_dropin.
+# Build these after token-eater is near completion.
+hov_registry:
+  source: "https://houseofvibe.ai/skills"   # placeholder — registry not live yet
+  status: stubbed
+  skills:
+    - { id: hov-dead-code,            title: "Dead-code removal (HoV)",     status: planned }
+    - { id: hov-isomorphic-simplify,  title: "Isomorphic simplify (HoV)",   status: planned }
+    - { id: hov-de-monolithize,       title: "De-monolithize (HoV)",        status: planned }
+    - { id: hov-mock-removal,         title: "Mock removal (HoV)",          status: planned }
+    - { id: hov-optimize,             title: "Optimize (HoV)",              status: planned }
+    - { id: hov-deslop,               title: "Deslop (HoV)",                status: planned }
