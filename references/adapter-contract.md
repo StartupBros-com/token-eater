@@ -43,6 +43,12 @@ Confirmed against the installed CLIs with live calls; these resolve the former `
 
 The placeholder substitution differs per adapter (path vs. inline string; stdin vs. arg) — see `adapters.yaml` and the `result_capture` field.
 
+### Balance oracle — `scripts/onwatch-usage.sh` (2026-06-27)
+
+token-eater reads real credit/quota balances from **onwatch** when it is running. `onwatch-usage.sh <provider>` returns `{util_percent, resets_at, status}` and exits 3 when onwatch is absent (the common member case), so the loop falls back to spend-tracking / drain (R10). Sources: **grok** from onwatch's SQLite DB (`~/.onwatch/data/onwatch.db`, table `grok_quota_values`); **anthropic / codex** from onwatch's open Prometheus `/metrics` (seven-day window). This gives every adapter a reserve-floor and reset-aware signal on a power-user machine; grok stays drain posture but now with *visibility* (how much surplus remains, when it resets — verified: grok 11%, resets 2026-07-01).
+
+**Self-contained (no-onwatch) grok balance — finding, not yet built.** onwatch itself polls grok credits via the gRPC method `grok.com/grok_api_v2.GrokBuildBilling/GetGrokCredits` (`application/grpc-web+proto`), authenticated with the bearer token in `~/.grok/auth.json` (`.key` field). Replicating it directly — so members without onwatch get a native grok balance — needs the request message `.proto` shape: the empty-message call returns `grpc-status 12` (unimplemented). Tracked as a follow-up.
+
 ## Detection
 
 `scripts/detect-adapters.sh` reads the registry, runs `command -v` for each `id`, and reports which adapters are available with their default posture and cost rank. With none available, token-eater stops and changes nothing (R4).

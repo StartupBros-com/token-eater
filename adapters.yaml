@@ -34,7 +34,7 @@ adapters:
     structured_output: "--json-schema (soft)"
     result_capture: "stdout:.structuredOutput"
     reset_cadence: "weekly-credits"
-    balance_signal: "none"          # no headless balance exists — grok runs drain, blow through (R8)
+    balance_signal: "onwatch"       # scripts/onwatch-usage.sh grok (from onwatch.db); exit 3 => none. Still drains, now with visibility (R8)
     strength_tier: "mechanical"
     circuit_breaker: "(usage limit reached|rate.?limit|out of credits|429)"
     default_posture: "drain"
@@ -45,7 +45,7 @@ adapters:
     structured_output: "--output-schema (hard)"
     result_capture: "file:{result_file}"
     reset_cadence: "weekly-cap"
-    balance_signal: "none"          # v1: none. onwatch oracle is deferred (R10 conservative fallback)
+    balance_signal: "onwatch"       # scripts/onwatch-usage.sh codex (from /metrics); reserve floor when present, else conservative (R10)
     strength_tier: "high"
     circuit_breaker: "(usage limit reached|rate.?limit|429 too many requests)"
     default_posture: "protect"
@@ -56,7 +56,7 @@ adapters:
     structured_output: "--output-format json --json-schema (hard)"
     result_capture: "stdout:.structured_output"
     reset_cadence: "5h-rolling+weekly"
-    balance_signal: "none"          # v1: none. onwatch covers this for power users (deferred)
+    balance_signal: "onwatch"       # scripts/onwatch-usage.sh claude->anthropic (from /metrics); reserve floor when present, else conservative (R10)
     strength_tier: "high"
     circuit_breaker: "(usage limit|rate.?limit|429)"
     default_posture: "protect"
