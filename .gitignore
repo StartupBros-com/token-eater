@@ -1,0 +1,5 @@
+# token-eater
+*.log
+.token-eater.local.yaml
+scratch/
+.DS_Store

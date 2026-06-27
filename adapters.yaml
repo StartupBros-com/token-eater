@@ -1,0 +1,4 @@
+# token-eater provider registry (U2)
+# Adding a provider = adding an entry here; the harvest loop reads this generically (R3).
+# Each entry declares the five-field adapter contract — see references/adapter-contract.md.
+adapters: []  # planned: claude, codex, grok
