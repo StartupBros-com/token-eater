@@ -6,7 +6,7 @@ An **adapter** is the thin description of one model CLI that token-eater can del
 
 Each adapter declares:
 
-1. **invoke** — the headless invocation template. token-eater substitutes `{prompt_file}`, `{schema_file}`, and `{result_file}` at run time. The call must be non-interactive and must not open a TUI.
+1. **invoke** — the headless invocation template, run with the worktree as cwd (so no `--cwd` is needed). token-eater substitutes shell-escaped placeholders: `{prompt_file}` / `{prompt_text}` (prompt as a path or inline string), `{schema_file}` / `{schema_json}` (schema as a path or inline string), and `{result_file}` (where the adapter writes its result). Each adapter uses whichever form its CLI expects — they differ. The call must be non-interactive and must not open a TUI.
 2. **reset_cadence** — how the subscription's quota resets. Informational for drain providers; for protect providers it informs the idle-window / pre-reset timing.
 3. **balance_signal** — `none`, or the name of an oracle that can report remaining budget. Optional by design: most providers expose no headless balance, so `none` is a first-class value. A protect provider with `none` is harvested conservatively (idle window only); a future signal drops in here with no loop change (R10, R11).
 4. **strength_tier** — the highest chore tier the adapter is trusted for: `mechanical`, `standard`, or `high`. Routing never sends a chore to an adapter whose tier is below the chore's tier.
@@ -19,19 +19,29 @@ Plus two routing fields:
 
 A sixth field, **structured_output**, names the flag/mechanism that constrains the CLI to emit the 5-field result schema (`status`, `files_modified`, `issues`, `summary`, `verification_summary`) consumed by the delegation harness (see `delegation-invocation.md`).
 
+A seventh field, **result_capture**, tells the harness *where* that result is — `file:{result_file}` when the CLI writes it to a file (codex), or `stdout:<field>` when the result lives in a field of the CLI's stdout JSON envelope (grok's `.structuredOutput`, claude's `.structured_output`).
+
 ## The three v1 adapters
 
-| id | tier | posture | cost | balance | invoke (headless) |
-|----|------|---------|------|---------|-------------------|
-| `grok` | mechanical | drain | 1 | none | `grok -p --output-format json --json-schema …` |
-| `codex` | high | protect | 2 | none | `codex exec --output-schema … -o … - < …` |
-| `claude` | high | protect | 3 | none | `claude -p …` |
+| id | tier | posture | cost | prompt input | schema | result | file-edit flag |
+|----|------|---------|------|--------------|--------|--------|----------------|
+| `grok` | mechanical | drain | 1 | `--prompt-file` | `--json-schema` (soft) | stdout `.structuredOutput` | `--always-approve` |
+| `codex` | high | protect | 2 | stdin (`- <`) | `--output-schema` (hard) | `-o` file | `-s workspace-write` |
+| `claude` | high | protect | 3 | `-p "<text>"` | `--json-schema` (hard) | stdout `.structured_output` | `--permission-mode acceptEdits` |
 
-Notes:
+- **grok** is the safe first adapter: pure expiring surplus, mechanical tier, run drain. Its `--json-schema` is *soft* — the prompt must ask for the result schema, and `structuredOutput` can come back `null`; the deterministic gate, not the result JSON, is the real safety net.
+- **codex** reuses the established `codex exec --output-schema` contract; it needs `-s workspace-write` to edit files in the worktree. Protect, high tier.
+- **claude** runs the user's own primary capacity; protect, high tier. `claude -p --output-format json --json-schema` enforces the schema, and its envelope additionally reports `total_cost_usd` and `usage` (usable for spend self-metering).
 
-- **grok** is the safe first adapter: pure expiring surplus, mechanical tier, run drain — blow through until it signals exhaustion or the backlog empties. No balance check needed. Verified flags: `-p`, `--output-format json`, `--json-schema`, `--effort`, `--best-of-n`, `--check`.
-- **codex** reuses the established `codex exec --output-schema` contract; protect posture (it is a primary provider), high tier.
-- **claude** runs the user's own primary capacity; protect posture, high tier. Its structured-output mechanism is marked `tbd-preflight` — the U4 headless-contract preflight confirms whether `claude -p` can emit the result schema (and how) before the adapter is trusted.
+### Verified headless contracts (2026-06-27)
+
+Confirmed against the installed CLIs with live calls; these resolve the former `claude` `tbd-preflight`:
+
+- `grok --prompt-file <file> --json-schema '<schema>' --always-approve` → prints a JSON envelope to stdout; the structured result is `.structuredOutput` (or `null` with `.structuredOutputError` when the model didn't emit conformant JSON). `--json-schema` implies `--output-format json`.
+- `codex exec -s workspace-write --output-schema <file> -o <file> - < <prompt>` → writes the schema-conformant result to the `-o` file; prompt on stdin.
+- `claude -p "<prompt>" --output-format json --json-schema '<schema>' --permission-mode acceptEdits` → prints a JSON envelope to stdout; the structured result is `.structured_output`. Enforced; envelope also carries `total_cost_usd` / `usage`.
+
+The placeholder substitution differs per adapter (path vs. inline string; stdin vs. arg) — see `adapters.yaml` and the `result_capture` field.
 
 ## Detection
 

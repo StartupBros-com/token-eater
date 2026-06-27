@@ -53,7 +53,7 @@ Every delegated run must produce exactly this JSON shape. Extra keys are ignored
 }
 ```
 
-Write this schema to a per-run `schema.json` file and pass its path as `{schema_file}` in the adapter `invoke` template.
+Write this schema to a per-run `schema.json` file. Adapters that take a schema *path* use `{schema_file}` (codex); adapters that take the schema *inline* use `{schema_json}` (grok, claude) — substitute the file's contents as a shell-escaped string. Read the result from the location named by the adapter's `result_capture` field: a `{result_file}` on disk (codex) or a field of the stdout JSON envelope (grok `.structuredOutput`, claude `.structured_output`).
 
 ## One-time headless-contract preflight
 
@@ -80,7 +80,7 @@ Preflight steps:
 5. Parse `result.json` if the template writes one; otherwise parse stdout only if the adapter contract says stdout is the result channel.
 6. Validate the 5 fields and types.
 
-Claude note: `adapters.yaml` marks `claude` `structured_output: tbd-preflight`. Resolve that during this preflight. If the installed `claude -p` cannot be made to emit schema-valid JSON headlessly and non-interactively, park `claude` for this run and record that its structured-output contract is unresolved. Do not send chores to Claude until the preflight is green.
+Verified contracts (2026-06-27): all three v1 adapters are confirmed — see `references/adapter-contract.md` "Verified headless contracts". `claude -p --output-format json --json-schema '<schema>' --permission-mode acceptEdits` emits the schema in its stdout `.structured_output`; `grok --prompt-file <file> --json-schema '<schema>' --always-approve` emits `.structuredOutput` (soft — may be `null`, in which case the gate decides); `codex exec -s workspace-write --output-schema <file> -o <file> - < <prompt>` writes the result file. The preflight still runs once per adapter per machine to catch auth or version drift, but it no longer needs to *discover* the contract.
 
 ## Per-chore harness
 

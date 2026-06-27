@@ -5,19 +5,34 @@
 #
 # Contract fields per adapter (see references/adapter-contract.md):
 #   id                 unique key; matches the CLI binary name used for detection
-#   invoke             headless invocation template; {prompt_file} {schema_file} {result_file} are substituted
+#   invoke             headless invocation template (substitution placeholders below)
 #   structured_output  the flag/mechanism that constrains output to the 5-field result schema
+#   result_capture     where token-eater reads the result JSON:
+#                        "file:{result_file}"  — the adapter writes it to a file
+#                        "stdout:<field>"       — parse the adapter's stdout JSON envelope, take <field>
 #   reset_cadence      how the subscription quota resets (drives time-gating for protect posture)
 #   balance_signal     "none" | "<oracle-name>" — where remaining budget can be read (optional; R10/R11)
 #   strength_tier      highest chore tier this adapter is trusted for: mechanical | standard | high
 #   circuit_breaker    regex signalling rate-limit / credit exhaustion in the CLI's output (R16)
 #   default_posture    drain | protect (R7; a non-expiring provider must never be drain)
 #   cost_rank          integer, lower = cheaper; routing prefers the cheapest in-tier adapter (R6)
+#
+# invoke placeholders (token-eater substitutes shell-escaped values; the command runs with the
+# worktree as cwd, so no --cwd is needed):
+#   {prompt_file}  path to the prompt file        {prompt_text}  prompt as an inline string
+#   {schema_file}  path to the JSON schema file   {schema_json}  JSON schema as an inline string
+#   {result_file}  path the adapter writes its result JSON to
+#
+# Verified against the installed CLIs on 2026-06-27 (see references/adapter-contract.md
+# "Verified headless contracts"). grok's --json-schema is SOFT (the prompt must request the
+# schema and structuredOutput may be null) — the deterministic gate is the real safety net, not
+# the result JSON. codex and claude enforce the schema.
 
 adapters:
   - id: grok
-    invoke: "grok -p --output-format json --json-schema {schema_file}"
-    structured_output: "--json-schema"
+    invoke: "grok --prompt-file {prompt_file} --json-schema {schema_json} --always-approve"
+    structured_output: "--json-schema (soft)"
+    result_capture: "stdout:.structuredOutput"
     reset_cadence: "weekly-credits"
     balance_signal: "none"          # no headless balance exists — grok runs drain, blow through (R8)
     strength_tier: "mechanical"
@@ -26,8 +41,9 @@ adapters:
     cost_rank: 1
 
   - id: codex
-    invoke: "codex exec --output-schema {schema_file} -o {result_file} - < {prompt_file}"
-    structured_output: "--output-schema"
+    invoke: "codex exec -s workspace-write --output-schema {schema_file} -o {result_file} - < {prompt_file}"
+    structured_output: "--output-schema (hard)"
+    result_capture: "file:{result_file}"
     reset_cadence: "weekly-cap"
     balance_signal: "none"          # v1: none. onwatch oracle is deferred (R10 conservative fallback)
     strength_tier: "high"
@@ -36,8 +52,9 @@ adapters:
     cost_rank: 2
 
   - id: claude
-    invoke: "claude -p {prompt_file}"   # structured-output mechanism confirmed in U4 preflight
-    structured_output: "tbd-preflight"  # confirm claude -p JSON/schema support during U4
+    invoke: "claude -p {prompt_text} --output-format json --json-schema {schema_json} --permission-mode acceptEdits"
+    structured_output: "--output-format json --json-schema (hard)"
+    result_capture: "stdout:.structured_output"
     reset_cadence: "5h-rolling+weekly"
     balance_signal: "none"          # v1: none. onwatch covers this for power users (deferred)
     strength_tier: "high"
