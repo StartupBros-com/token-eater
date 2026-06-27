@@ -4,20 +4,16 @@ This playbook runs one eligible chore on one adapter. It is the isolation and ve
 
 The shape mirrors the proven Codex delegation harness: pass file paths instead of large file contents, launch headless work in the background, poll separately, and roll back the worktree on red.
 
-## Do not delegate from inside a model sandbox
+## Recursion guard (do NOT block on the orchestrator's own session)
 
-Before creating a worktree, check whether this process is already running inside a model sandbox. If so, skip delegation and finish the chore locally or defer it. Do not recursively launch model CLIs from inside another model-controlled sandbox.
+token-eater's orchestrator runs inside a model session **by design** — when invoked as `/token-eater` from Claude Code, `CLAUDECODE` (and similar interactive-session flags) is **always set**. That is the normal, expected entry point and MUST NOT block delegation. Treating `CLAUDECODE` / `CLAUDE_CODE_SANDBOX` / `CLAUDECODE`-style flags as a "don't delegate" signal is the bug that makes token-eater silently do the work *itself* instead of burning surplus — the whole product becomes a no-op. **Never block delegation just because the orchestrator is in a model session.**
 
-Treat these as blocking signals when present and non-empty:
+The only real recursion to prevent is delegating to an adapter while this run is itself executing *inside a token-eater chore-worker* (self-nesting). Guard narrowly:
 
-- `CODEX_SANDBOX`
-- `CLAUDE_CODE_SANDBOX`
-- `CLAUDECODE`
-- `CURSOR_AGENT`
-- `AIDER_MODEL`
-- Any provider-specific sandbox flag documented by the current environment
+- Skip **all** delegation only if `TOKEN_EATER_DELEGATED=1` is set — the runners export this into every worker they launch, so a chore-worker that somehow re-invokes token-eater is refused. (Do not strip this var.)
+- Skip the **codex** adapter specifically if `CODEX_SANDBOX` / `CODEX_SESSION_ID` is set (you are literally inside a codex worker); skip a given adapter only when inside that same adapter's worker sandbox.
 
-Report the skip as `issues[]` in the chore summary; it is not a gate failure.
+Do NOT skip an adapter merely because a model-session flag is present — the orchestrator always has one. When a narrow guard does fire, report it in `issues[]`; it is not a gate failure.
 
 ## Result schema
 

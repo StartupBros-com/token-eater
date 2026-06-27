@@ -13,6 +13,7 @@
 # Emits a JSON object on stdout. Exit codes (same contract as delegate-grok.sh):
 #   0 ok   2 invoke-error   3 circuit-breaker (park)   4 scope-violation (rollback)
 set -euo pipefail
+export TOKEN_EATER_DELEGATED=1   # marker so a worker that re-invokes token-eater is refused (recursion guard)
 
 WT="${1:?worktree dir required}"
 PROMPT="${2:?prompt file required}"

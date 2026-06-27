@@ -22,6 +22,7 @@
 #   3 circuit-break credit/rate-limit signal detected (caller parks grok — R16)
 #   4 scope-viol    grok modified a file outside the allowed list (caller rolls back)
 set -euo pipefail
+export TOKEN_EATER_DELEGATED=1   # marker so a worker that re-invokes token-eater is refused (recursion guard)
 
 WT="${1:?worktree dir required}"
 PROMPT="${2:?prompt file required}"

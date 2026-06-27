@@ -86,11 +86,12 @@ Use this path only when the deterministic gate passed and the worktree contains 
 3. **Commit the gate-passing changes on the token-eater branch.** Keep the commit message plain and scoped:
 
    ```bash
-   git add --all
+   git add -u                     # tracked modifications/deletions only — never stage stray artifacts
+   git add -- <allowed_files>     # plus any NEW files the chore was scope-fenced to create
    git commit -m "chore(token-eater): <short chore title>"
    ```
 
-   Do not commit unrelated files from the user's main working tree. The worktree should contain only the delegated diff and run-local artifacts that belong in the branch.
+   Do **not** use `git add --all` / `git add .` — run artifacts (`prompt.txt`, `schema.json`, `result.json`) and injected deps (`node_modules`/`.venv` symlinks) must never land in the PR. Stage only the chore's tracked edits and its allowed new files. Run artifacts live under the main repo's `.token-eater/runs/<run-id>/`, not in the worktree.
 
 4. **Detect a remote.** From the worktree, check:
 
