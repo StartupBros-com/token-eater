@@ -1,4 +1,46 @@
-# token-eater provider registry (U2)
-# Adding a provider = adding an entry here; the harvest loop reads this generically (R3).
-# Each entry declares the five-field adapter contract — see references/adapter-contract.md.
-adapters: []  # planned: claude, codex, grok
+# token-eater provider registry
+#
+# Adding a provider = adding an entry here. The harvest loop reads this file
+# generically, so a new adapter needs no change to the loop (R3).
+#
+# Contract fields per adapter (see references/adapter-contract.md):
+#   id                 unique key; matches the CLI binary name used for detection
+#   invoke             headless invocation template; {prompt_file} {schema_file} {result_file} are substituted
+#   structured_output  the flag/mechanism that constrains output to the 5-field result schema
+#   reset_cadence      how the subscription quota resets (drives time-gating for protect posture)
+#   balance_signal     "none" | "<oracle-name>" — where remaining budget can be read (optional; R10/R11)
+#   strength_tier      highest chore tier this adapter is trusted for: mechanical | standard | high
+#   circuit_breaker    regex signalling rate-limit / credit exhaustion in the CLI's output (R16)
+#   default_posture    drain | protect (R7; a non-expiring provider must never be drain)
+#   cost_rank          integer, lower = cheaper; routing prefers the cheapest in-tier adapter (R6)
+
+adapters:
+  - id: grok
+    invoke: "grok -p --output-format json --json-schema {schema_file}"
+    structured_output: "--json-schema"
+    reset_cadence: "weekly-credits"
+    balance_signal: "none"          # no headless balance exists — grok runs drain, blow through (R8)
+    strength_tier: "mechanical"
+    circuit_breaker: "(usage limit reached|rate.?limit|out of credits|429)"
+    default_posture: "drain"
+    cost_rank: 1
+
+  - id: codex
+    invoke: "codex exec --output-schema {schema_file} -o {result_file} - < {prompt_file}"
+    structured_output: "--output-schema"
+    reset_cadence: "weekly-cap"
+    balance_signal: "none"          # v1: none. onwatch oracle is deferred (R10 conservative fallback)
+    strength_tier: "high"
+    circuit_breaker: "(usage limit reached|rate.?limit|429 too many requests)"
+    default_posture: "protect"
+    cost_rank: 2
+
+  - id: claude
+    invoke: "claude -p {prompt_file}"   # structured-output mechanism confirmed in U4 preflight
+    structured_output: "tbd-preflight"  # confirm claude -p JSON/schema support during U4
+    reset_cadence: "5h-rolling+weekly"
+    balance_signal: "none"          # v1: none. onwatch covers this for power users (deferred)
+    strength_tier: "high"
+    circuit_breaker: "(usage limit|rate.?limit|429)"
+    default_posture: "protect"
+    cost_rank: 3
