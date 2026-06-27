@@ -95,6 +95,8 @@ Run these steps for each chore selected by the harvest loop.
 
    If the repository has uncommitted user changes, do not touch or stash them. Worktree isolation is what protects the user's current tree (R12).
 
+   **Worktree dependencies (load-bearing for non-trivial gates).** A fresh worktree has no `node_modules`, `.venv`, build cache, etc., so a real gate (`vitest`, `pytest`, `tsc`) cannot run there. Inject them — symlink the project's `node_modules` / virtualenv into the worktree (fast) or install in the worktree (slow). Then **exclude the injected paths from change detection**, or they register as stray files and trip the scope check. A worktree's `.git` is a *file*, so write to the path `git -C "$WORKTREE" rev-parse --git-path info/exclude` (not `<worktree>/.git/info/exclude`). The adapter runners also defensively ignore symlinks in their git-derived file list. Verified in the first real run (2026-06-27): a `node_modules` symlink the repo's `node_modules/` gitignore pattern did not match (symlink ≠ directory) surfaced as a false scope violation until excluded.
+
 3. **Assemble a scope-fenced prompt.** The prompt must include only the chore the provider is allowed to do:
    - Task title and one-paragraph objective.
    - Explicit repo-relative file list the adapter may read and modify.

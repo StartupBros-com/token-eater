@@ -59,7 +59,7 @@ ENV="$RUNDIR/envelope.json"
 awk 'f||/^[[:space:]]*\{/{f=1; print}' "$ENVRAW" > "$ENV"
 
 # --- ground truth: what changed in the worktree (the authoritative file list) ---
-mapfile -t CHANGED < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' || true)
+mapfile -t CHANGED < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' | while IFS= read -r f; do [ -L "$f" ] || printf '%s\n' "$f"; done)
 MADE_CHANGES=false; [ "${#CHANGED[@]}" -gt 0 ] && MADE_CHANGES=true
 
 # --- optional scope check: every changed file must be in the allowed list ---

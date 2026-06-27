@@ -49,7 +49,7 @@ if ! { command -v jq >/dev/null && jq -e . "$ENV" >/dev/null 2>&1; }; then
 fi
 
 # --- ground truth: what changed in the worktree ---
-mapfile -t CHANGED < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' || true)
+mapfile -t CHANGED < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' | while IFS= read -r f; do [ -L "$f" ] || printf '%s\n' "$f"; done)
 MADE_CHANGES=false; [ "${#CHANGED[@]}" -gt 0 ] && MADE_CHANGES=true
 
 SCOPE_VIOLATION=false; OFFENDERS=()

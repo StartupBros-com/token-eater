@@ -47,7 +47,7 @@ if [ "$CODEX_EXIT" -ne 0 ] && [ ! -s "$RESULT" ]; then
 fi
 
 # --- ground truth: what changed in the worktree (authoritative file list) ---
-mapfile -t CHANGED < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' || true)
+mapfile -t CHANGED < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' | while IFS= read -r f; do [ -L "$f" ] || printf '%s\n' "$f"; done)
 MADE_CHANGES=false; [ "${#CHANGED[@]}" -gt 0 ] && MADE_CHANGES=true
 
 # --- optional scope check against ground truth ---
