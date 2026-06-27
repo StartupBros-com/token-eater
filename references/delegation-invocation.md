@@ -214,3 +214,22 @@ Park a provider for the current harvest run when:
 - It repeatedly produces malformed or missing result JSON.
 
 Parking is per run, not permanent. Later runs may try the provider again after the reset cadence or after setup changes.
+
+## Grok adapter runner (`scripts/delegate-grok.sh`)
+
+Grok's self-report is unreliable — `.structuredOutput` is frequently `null` and the result JSON appears (or not) in a `.text` fence, sometimes with a non-enum status like `"success"`. `scripts/delegate-grok.sh` wraps the grok adapter so the harvest loop never depends on that: it runs the verified contract, then derives the trustworthy facts from ground truth (verified across live runs 2026-06-27).
+
+```bash
+scripts/delegate-grok.sh <worktree-dir> <prompt-file> [schema-file] [allowed-files-file]
+```
+
+It prints a JSON object and returns an exit code the loop acts on:
+
+| exit | meaning | loop action |
+| --- | --- | --- |
+| 0 | grok ran; `made_changes` + `files_modified` derived from `git` | if `made_changes`: run the gate (keep on pass, roll back on fail); else no-op (skip PR) |
+| 2 | invoke error (grok missing, no JSON envelope) | task failure — roll back |
+| 3 | `circuit_breaker` (credit / rate-limit signal matched) | park grok for the run (R16) — roll back |
+| 4 | `scope_violation` — grok changed a file outside the allowed list | roll back (R12) |
+
+`files_modified` comes from `git diff` + untracked in the worktree, not grok's word. The optional allowed-files list enforces the scope fence against ground truth (`scope_offenders` lists any stray files). `summary` defaults to a ground-truth line and is enriched with grok's own summary only when it parses cleanly. The deterministic gate stays authoritative for keep/rollback — `delegate-grok.sh` reports only *what changed* and *whether it stayed in scope*. `jq` is used for best-effort self-report parsing when available; the ground-truth facts work without it.
