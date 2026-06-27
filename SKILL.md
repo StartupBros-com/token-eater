@@ -11,6 +11,8 @@ Turn the subscription credits you would otherwise let expire into a clean-up cre
 
 This file is the orchestrator. The detailed playbooks live in `references/`; the provider registry is `adapters.yaml`.
 
+**Skill files resolve from THIS skill's base directory, not the user's project.** Every `scripts/...`, `references/...`, `adapters.yaml`, and `skills-catalog.yaml` path below is relative to the directory this `SKILL.md` lives in (the base directory the harness reports when the skill is invoked). Invoke scripts by their absolute path inside the skill — e.g. `bash <skill-dir>/scripts/detect-adapters.sh`. The *chores* run in the user's project (a worktree of it); the *tooling* lives with the skill.
+
 ## Status
 
 `[BETA]` — manual invocation only (`disable-model-invocation: true`). Do not wire token-eater into other skills' handoffs during the beta.
