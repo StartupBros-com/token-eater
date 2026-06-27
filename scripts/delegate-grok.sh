@@ -86,7 +86,7 @@ if command -v jq >/dev/null && jq -e . "$ENV" >/dev/null 2>&1; then
   # grok's self-report: a ```json fence first, else a flat inline {...} containing "summary"
   CAND="$(printf '%s' "$TEXT" | awk '/```json/{f=1;next} /```/{f=0} f')"
   [ -n "$CAND" ] && ! printf '%s' "$CAND" | jq -e . >/dev/null 2>&1 && CAND=""
-  [ -z "$CAND" ] && CAND="$(printf '%s' "$TEXT" | grep -oE '\{[^{}]*"summary"[^{}]*\}' | tail -1)"
+  [ -z "$CAND" ] && CAND="$(printf '%s' "$TEXT" | grep -oE '\{[^{}]*"summary"[^{}]*\}' | tail -1 || true)"
   if [ -n "$CAND" ] && printf '%s' "$CAND" | jq -e . >/dev/null 2>&1; then
     RAWSTATUS="$(printf '%s' "$CAND" | jq -r '.status // ""')"
     case "$RAWSTATUS" in completed|success|ok|done) GROK_STATUS="completed";; partial) GROK_STATUS="partial";; failed|error) GROK_STATUS="failed";; *) GROK_STATUS="$RAWSTATUS";; esac
