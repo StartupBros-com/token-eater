@@ -65,12 +65,13 @@ Detail lives in the references; the shape is:
 | `references/adapter-contract.md` | The five-field adapter contract + the three v1 adapters + the balance oracle | U2 |
 | `references/setup-and-config.md` | First-run onboarding + config schema + interactive run-config | U3 |
 | `references/delegation-invocation.md` | Per-adapter headless delegation harness + the `delegate-<adapter>.sh` runners | U4 |
+| `references/worktree-lifecycle.md` | Worktree isolation, collision-safe naming, concurrency, and cleanup (`scripts/wt.sh`) | U4 |
 | `references/chore-discovery.md` | Chore discovery + deterministic-gate eligibility + skill-aware resolution | U5 |
 | `references/harvest-loop.md` | Drain/protect posture engine + stop conditions | U6 |
 | `references/review-pipeline.md` | Optional review/fix loop + frontier-review recommendation | U7+ |
 | `references/result-handling.md` | Draft PR + plain-language summary + run ledger | U7 |
 | `references/schedule-install.md` | Cross-platform schedule installer | U8 |
 
-Scripts: `detect-adapters.sh` (registry scan) · `detect-skills.sh` (catalog scan) · `onwatch-usage.sh` (balance oracle) · `run-gate.sh` (deterministic gate) · `delegate-{grok,codex,claude}.sh` (per-adapter runners).
+Scripts: `detect-adapters.sh` (registry scan) · `detect-skills.sh` (catalog scan) · `onwatch-usage.sh` (balance oracle) · `wt.sh` (worktree create/cleanup/sweep) · `run-gate.sh` (deterministic gate) · `delegate-{grok,codex,claude}.sh` (per-adapter runners).
 
 The full plan is at `docs/plans/2026-06-26-001-feat-token-eater-credit-harvester-plan.md`.

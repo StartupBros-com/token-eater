@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# wt.sh — token-eater worktree lifecycle: isolation, concurrency, and cleanup.
+#
+# Vendors the best practices from the compound-engineering `ce-worktree`
+# (worktree-manager.sh) and `wt-sweep.sh` so token-eater is self-contained for
+# House of Vibe members who do not have those skills installed.
+#
+# Isolation: each chore runs in its own worktree on a branch cut from a COMMITTED
+# ref, so the user's main checkout (and any uncommitted WIP) is never touched and
+# they can keep working. Concurrency: worktree/branch names are keyed by run-id, and
+# the brief git ref operations are serialized with a per-repo flock, so parallel
+# token-eater sessions cannot corrupt each other.
+#
+# Subcommands:
+#   create  <repo> <run-id> <chore-slug> [base-ref]   -> prints the new worktree path
+#   cleanup <repo> <worktree> keep|drop                -> remove worktree; keep or drop the branch
+#   sweep   <repo>                                      -> remove orphaned te worktrees (DRY_RUN=1 default)
+set -euo pipefail
+
+WORKTREE_SUBDIR=".claude/worktrees"          # the user's on-disk convention
+ACTIVE_MIN="${ACTIVE_MIN:-120}"              # skip worktrees touched within this many minutes (live)
+
+die() { echo "wt.sh: $*" >&2; exit 2; }
+repo_root() { git -C "$1" rev-parse --show-toplevel 2>/dev/null || die "not a git repo: $1"; }
+
+# Run git ref-mutating ops under a short-held per-repo lock (avoids index.lock races
+# between parallel token-eater sessions). flock is optional — degrade if absent.
+with_lock() {
+  local repo="$1"; shift
+  local lock; lock="$(git -C "$repo" rev-parse --git-common-dir)/token-eater.lock"
+  case "$lock" in /*) : ;; *) lock="$repo/$lock" ;; esac
+  if command -v flock >/dev/null 2>&1; then
+    ( flock -x -w 30 9 || die "timed out acquiring repo lock"; "$@" ) 9>"$lock"
+  else
+    "$@"
+  fi
+}
+
+cmd_create() {
+  local repo run_id slug base
+  repo="$(repo_root "${1:?repo}")"; run_id="${2:?run-id}"; slug="${3:?chore-slug}"; base="${4:-HEAD}"
+  local branch="token-eater/${run_id}-${slug}"
+  local wt="$repo/$WORKTREE_SUBDIR/te-${run_id}-${slug}"
+
+  # keep the worktree dir out of the index (idempotent)
+  if ! { [ -f "$repo/.gitignore" ] && grep -qF "$WORKTREE_SUBDIR" "$repo/.gitignore"; }; then
+    printf '%s\n' "$WORKTREE_SUBDIR/" >> "$repo/.gitignore" 2>/dev/null || true
+  fi
+
+  # branch from a COMMITTED ref (never the dirty working tree) so main is untouched
+  with_lock "$repo" git -C "$repo" worktree add -q -b "$branch" "$wt" "$base" \
+    || die "worktree add failed (branch $branch may already exist)"
+
+  # --- set the worktree up to actually run the gate (ce-worktree + the deps fix) ---
+  # 1. env files
+  for f in "$repo"/.env "$repo"/.env.*; do
+    [ -e "$f" ] || continue
+    case "$(basename "$f")" in *.example) continue ;; esac
+    cp -p "$f" "$wt/" 2>/dev/null || true
+  done
+  # 2. dependencies (symlink, so the gate's tsc/vitest/pytest resolve) + exclude from change detection
+  local exclude; exclude="$(git -C "$wt" rev-parse --git-path info/exclude)"
+  for dep in node_modules .venv venv; do
+    if [ -e "$repo/$dep" ] && [ ! -e "$wt/$dep" ]; then
+      ln -s "$repo/$dep" "$wt/$dep" 2>/dev/null && printf '%s\n' "$dep" >> "$exclude"
+    fi
+  done
+
+  echo "$wt"
+}
+
+cmd_cleanup() {
+  local repo wt mode
+  repo="$(repo_root "${1:?repo}")"; wt="${2:?worktree}"; mode="${3:?keep|drop}"
+  local branch; branch="$(git -C "$wt" symbolic-ref --short HEAD 2>/dev/null || echo "")"
+  with_lock "$repo" git -C "$repo" worktree remove --force "$wt" 2>/dev/null || true
+  if [ "$mode" = drop ] && [ -n "$branch" ] && [ "$branch" != "$(default_branch "$repo")" ]; then
+    # never force-delete a branch holding real unpushed work (wt-sweep rule)
+    local unpushed; unpushed="$(git -C "$repo" rev-list --count "$branch" --not --remotes 2>/dev/null || echo 0)"
+    if [ "${unpushed:-0}" -lt 2 ]; then
+      with_lock "$repo" git -C "$repo" branch -D "$branch" 2>/dev/null || true
+    else
+      echo "wt.sh: kept branch $branch ($unpushed unpushed commits — not force-deleting)" >&2
+    fi
+  fi
+}
+
+default_branch() {
+  git -C "$1" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' \
+    || echo main
+}
+
+cmd_sweep() {
+  local repo; repo="$(repo_root "${1:?repo}")"
+  local dry="${DRY_RUN:-1}"; local now; now="$(date +%s)"
+  git -C "$repo" worktree prune 2>/dev/null || true
+  git -C "$repo" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2}' | while read -r wt; do
+    case "$wt" in *"/$WORKTREE_SUBDIR/te-"*) : ;; *) continue ;; esac   # only token-eater worktrees
+    [ -d "$wt" ] || continue
+    # skip live worktrees (a running session owns them)
+    case "$wt" in */.claude/jobs/*|/tmp/*) echo "skip(job): $wt"; continue ;; esac
+    local mt; mt="$(stat -c %Y "$wt" 2>/dev/null || echo 0)"
+    if (( (now - mt) / 60 < ACTIVE_MIN )); then echo "skip(active): $wt"; continue; fi
+    if command -v lsof >/dev/null 2>&1 && lsof +D "$wt" >/dev/null 2>&1; then echo "skip(in-use): $wt"; continue; fi
+    local branch unpushed
+    branch="$(git -C "$wt" symbolic-ref --short HEAD 2>/dev/null || echo "")"
+    unpushed="$(git -C "$wt" rev-list --count HEAD --not --remotes 2>/dev/null || echo 0)"
+    if [ "$dry" = 1 ]; then
+      echo "would remove orphan worktree: $wt (branch $branch, $unpushed unpushed — branch kept)"
+    else
+      with_lock "$repo" git -C "$repo" worktree remove --force "$wt" 2>/dev/null \
+        && echo "removed: $wt (branch $branch preserved)"
+    fi
+  done
+  [ "$dry" = 1 ] && echo "(DRY_RUN — re-run with DRY_RUN=0 to apply)"
+}
+
+case "${1:-}" in
+  create)  shift; cmd_create  "$@" ;;
+  cleanup) shift; cmd_cleanup "$@" ;;
+  sweep)   shift; cmd_sweep   "$@" ;;
+  *) die "usage: wt.sh create|cleanup|sweep ..." ;;
+esac
