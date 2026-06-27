@@ -93,35 +93,38 @@ Use this path only when the deterministic gate passed and the worktree contains 
 
    Do **not** use `git add --all` / `git add .` — run artifacts (`prompt.txt`, `schema.json`, `result.json`) and injected deps (`node_modules`/`.venv` symlinks) must never land in the PR. Stage only the chore's tracked edits and its allowed new files. Run artifacts live under the main repo's `.token-eater/runs/<run-id>/`, not in the worktree.
 
-4. **Detect a remote.** From the worktree, check:
+4. **Resolve the target repo — always the user's OWN remote, NEVER an upstream parent.** The PR must land on `origin`. `gh pr create` defaults a *fork's* PR to its upstream parent, which would open a PR on a **third party's repo** — never allow that.
 
    ```bash
-   git remote get-url origin
+   ORIGIN_URL="$(git -C "$WORKTREE" remote get-url origin)" || { echo "no origin -> keep local branch"; }
+   # owner/name from git@host:O/N.git or https://host/O/N.git
+   ORIGIN_SLUG="$(printf '%s' "$ORIGIN_URL" | sed -E 's#(git@[^:]+:|https?://[^/]+/)##; s#\.git$##')"
+   BASE="$(git -C "$WORKTREE" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || echo main)"
    ```
 
-   If this fails, skip PR creation and keep the local branch.
+   If origin cannot be resolved, skip PR creation and keep the local branch. If `origin` is a fork (`gh repo view "$ORIGIN_SLUG" --json isFork`), still target `$ORIGIN_SLUG` — say plainly in the summary that the PR was opened on the user's fork, not upstream.
 
-5. **Push only the token-eater branch when a remote exists.**
+5. **Push only the token-eater branch to origin.**
 
    ```bash
-   git push -u origin "token-eater/<run-id>"
+   git -C "$WORKTREE" push -u origin "token-eater/<run-id>"
    ```
 
-   This is the only push result handling should perform. Never push the default branch.
+   Never push the default branch.
 
-6. **Open a draft PR when `gh` is available.**
-
-   ```bash
-   gh pr create --draft --fill --head "token-eater/<run-id>"
-   ```
-
-   If `--fill` cannot produce a clear title/body, provide them explicitly:
+6. **Open a draft PR ON ORIGIN, when `gh` is available.** Always pass `--repo "$ORIGIN_SLUG"` and `--base "$BASE"`. Do not use `--fill` (it can fail or pull the wrong title).
 
    ```bash
-   gh pr create --draft \
-     --head "token-eater/<run-id>" \
+   gh pr create --repo "$ORIGIN_SLUG" --base "$BASE" --head "token-eater/<run-id>" --draft \
      --title "chore(token-eater): <short chore title>" \
      --body-file ".token-eater/runs/<run-id>/pr-body.md"
+   ```
+
+   If `gh pr create` still errors (e.g. "No commits between..."), fall back to the API on the **same** repo, never the parent:
+
+   ```bash
+   gh api "repos/$ORIGIN_SLUG/pulls" -f head="token-eater/<run-id>" -f base="$BASE" -F draft=true \
+     -f title="chore(token-eater): <short chore title>"
    ```
 
 7. **Record the PR URL or branch reference.** If the draft PR was created, store its URL. If push or `gh` failed but the local branch exists, store `branch-only: token-eater/<run-id>` with the reason.
