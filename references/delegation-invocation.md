@@ -215,7 +215,9 @@ Park a provider for the current harvest run when:
 
 Parking is per run, not permanent. Later runs may try the provider again after the reset cadence or after setup changes.
 
-## Grok adapter runner (`scripts/delegate-grok.sh`)
+## Adapter runners (`scripts/delegate-<adapter>.sh`)
+
+There is one runner per adapter — `delegate-grok.sh`, `delegate-codex.sh`, `delegate-claude.sh` — and they share an identical exit-code contract and output shape, so the harvest loop treats them uniformly. All three derive `files_modified` from `git` (ground truth), enforce the optional allowed-files scope fence, detect the circuit breaker, and leave keep/rollback to the deterministic gate. They differ only in the verified per-adapter invocation and where each CLI puts its result.
 
 Grok's self-report is unreliable — `.structuredOutput` is frequently `null` and the result JSON appears (or not) in a `.text` fence, sometimes with a non-enum status like `"success"`. `scripts/delegate-grok.sh` wraps the grok adapter so the harvest loop never depends on that: it runs the verified contract, then derives the trustworthy facts from ground truth (verified across live runs 2026-06-27).
 
@@ -233,3 +235,5 @@ It prints a JSON object and returns an exit code the loop acts on:
 | 4 | `scope_violation` — grok changed a file outside the allowed list | roll back (R12) |
 
 `files_modified` comes from `git diff` + untracked in the worktree, not grok's word. The optional allowed-files list enforces the scope fence against ground truth (`scope_offenders` lists any stray files). `summary` defaults to a ground-truth line and is enriched with grok's own summary only when it parses cleanly. The deterministic gate stays authoritative for keep/rollback — `delegate-grok.sh` reports only *what changed* and *whether it stayed in scope*. `jq` is used for best-effort self-report parsing when available; the ground-truth facts work without it.
+
+`delegate-codex.sh` and `delegate-claude.sh` follow the same contract but lean on reliable self-reports: codex writes the schema-valid result to its `-o` file, and claude returns it in the stdout envelope's `.structured_output` and additionally reports `total_cost_usd` (surfaced as `cost_usd` for spend self-metering). Both still derive `files_modified` and the scope check from `git`. All three normalize the advisory `self_status` (e.g. `success` → `completed`); the gate sets the authoritative status. Verified live 2026-06-27: grok, codex, and claude each ran the unused-imports chore in an isolated worktree, passed the ruff gate, and were correctly kept; a grok scope-violation case returned exit 4. (The three runners share ~70% of their logic — extracting a common library is tracked as a follow-up.)
