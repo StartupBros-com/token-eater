@@ -24,6 +24,48 @@ Allowed gate types are:
 
 If no gate exists, exclude the candidate and record the reason in the run summary. Do not send ungated work to a model, no matter how mechanical it seems (R5, KTD9).
 
+## Skill-aware discovery
+
+Discovery is skill-aware, but still gate-first. `skills-catalog.yaml` maps chore archetypes to the skill or bundled prompt that may perform them; `scripts/detect-skills.sh` resolves that catalog on the member's machine. Use the detector before creating chore candidates so token-eater can reuse installed skills without making them a hard dependency (KTD6, R18, R19).
+
+Run from the token-eater package root:
+
+```bash
+scripts/detect-skills.sh
+```
+
+The detector prints one TSV row per catalog archetype:
+
+```text
+<status>    <archetype>    <skill-or-detail>
+```
+
+Statuses mean:
+
+| Status                 | Meaning                                                                            | Discovery action                                                                                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `installed`            | A skill or command declared by the catalog is present.                             | Use that catalog-declared skill/tool as the prompt source for matching chores.                                                                          |
+| `hov-dropin-available` | No installed skill was found, but the catalog names a House of Vibe drop-in.       | Suggest the HoV drop-in in the plain summary, clearly saying it is STUBBED / not built yet and only a registry placeholder today. Do not block the run. |
+| `bundled`              | token-eater can drive the archetype directly with a built-in prompt or local tool. | Use the bundled safe-chore constraints below.                                                                                                           |
+| `missing`              | No installed skill, no HoV drop-in, and no bundled path.                           | Skip that archetype and summarize why.                                                                                                                  |
+
+Resolution order is per archetype:
+
+1. Use the installed skill/tool declared by `skills-catalog.yaml`.
+2. Else suggest the catalog's HoV drop-in, if present. Say plainly that the HoV drop-in is stubbed and not available yet; it is a placeholder for a future member-friendly skill download.
+3. Else use token-eater's bundled prompt/tool, if the detector reports `bundled`.
+4. Else skip the archetype.
+
+Do not hardcode skill names in this playbook. The catalog is the plug-in point: it declares which specific skill belongs to which archetype, and the detector resolves what exists on this machine. If the catalog changes later, discovery follows the catalog rather than this prose.
+
+The deterministic-gate rule still controls admission. A resolved skill only says _how_ to draft the chore; it does not make ungated work safe. After skill resolution, apply the same success criterion, gate relevance, explicit file scope, and tier checks as every other chore (R5, R6). If an installed skill wants to touch files outside the chore's allowed file list, narrow the prompt or skip the chore.
+
+Special cases:
+
+- `prose-deslop` is `review-only` in the catalog. It has no deterministic gate and runs only when the user explicitly opted into review-only mode. In normal unattended harvesting, skip it and explain: "Skipped prose cleanup because you did not enable review-only chores."
+- High-stakes skills such as bug hunting, deadlock fixing, and security auditing are deliberately not in `skills-catalog.yaml`. Leave them with Claude or a human reviewer. Do not discover or delegate them through token-eater's cheap-credit path, even if such skills are installed.
+- A HoV drop-in suggestion is member education, not execution. Do not pretend the stubbed registry item is downloadable until the catalog says it is real.
+
 ## Cheap discovery signals
 
 Use cheap, local signals first. Avoid expensive whole-repo analysis unless a gate is already available.
@@ -70,15 +112,11 @@ The backlog should usually begin with formatter idempotency. It is cheap, low-ri
 
 ## Optional skill routing
 
-token-eater is self-contained, but it may use installed skills as prompt sources when they are present:
+token-eater is self-contained, but it may use catalog-declared installed skills as prompt sources when they are present. The skill-aware discovery section is authoritative: use `skills-catalog.yaml` plus `scripts/detect-skills.sh` to decide, per archetype, whether the route is `installed`, `hov-dropin-available`, `bundled`, or `missing`.
 
-- If `de-slopify` is installed and the chore is documentation or local code de-slop, route the chore prompt through that skill's constraints.
-- If `ce-simplify-code` or an equivalent simplify-code skill is installed and the chore is a simplification task, route the matching tier through it.
-- If neither is installed, use the bundled prompt constraints below.
+Do not make optional skills required. Their absence must not block member use (KTD6, R18). When a skill is absent and no bundled route exists, skip that archetype rather than improvising an ungated prompt.
 
-Do not make these skills required. Their absence must not block member use (KTD6, R18).
-
-For de-slopify and simplify chores, always embed this safety constraint in the delegated prompt:
+For catalog-declared deslop and simplify-style chores, always embed this safety constraint in the delegated prompt:
 
 > Never simplify away a safety check, validation, permission check, rate-limit check, error handling branch, logging needed for diagnosis, or test assertion that protects behavior.
 
