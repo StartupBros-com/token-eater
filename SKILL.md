@@ -36,6 +36,7 @@ Parse `$ARGUMENTS` for optional tokens; strip each recognized token before inter
 
 1. **Locate config.** Look for token-eater config (user-scoped, with an optional per-project override). See `references/setup-and-config.md` for the path and schema.
 2. **No config, or the `setup` token → first-run setup.** Run the onboarding flow in `references/setup-and-config.md`: detect adapters, assign drain/protect posture, set the idle window, choose on-demand vs. a recurring schedule, and elicit the run preferences (implementer, intermediate-review mode, review/fix rounds, grok-tapped fallback, review depth). Persist config. If a schedule was chosen, install it per `references/schedule-install.md`.
+   - **Exception — `dry-run` with no config:** do NOT run interactive setup. Use registry defaults (grok = drain, codex/claude = protect) to plan and preview the run, and write nothing. Setup is only for real runs.
 3. **Config present → harvest loop.** Load config and run the loop in `references/harvest-loop.md`.
 4. **No supported adapter installed → stop.** If `scripts/detect-adapters.sh` finds none of the registered CLIs, print a plain-language explanation and exit without changing anything.
 

@@ -58,6 +58,8 @@ Resolution order is per archetype:
 
 Do not hardcode skill names in this playbook. The catalog is the plug-in point: it declares which specific skill belongs to which archetype, and the detector resolves what exists on this machine. If the catalog changes later, discovery follows the catalog rather than this prose.
 
+**`cmd:`-detected archetypes are machine-level, not project-level.** `detect-skills.sh` reports `installed` for `formatter-idempotency` / `lint-autofix` when the *binary* exists on the machine (e.g. global `prettier` or `ruff`) — it does NOT mean THIS project uses that tool. Before admitting such a chore, confirm a project-local config or script (a `.prettierrc`/`eslint.config.*`/`ruff.toml`, or a `package.json` `format`/`lint` script). If none exists, the gate would be irrelevant to the project (eligibility rule 3) — exclude the chore and say so. `scripts/run-gate.sh`'s own detection already keys on project config, so trust the gate over the bare detector here.
+
 The deterministic-gate rule still controls admission. A resolved skill only says _how_ to draft the chore; it does not make ungated work safe. After skill resolution, apply the same success criterion, gate relevance, explicit file scope, and tier checks as every other chore (R5, R6). If an installed skill wants to touch files outside the chore's allowed file list, narrow the prompt or skip the chore.
 
 Special cases:
