@@ -1,13 +1,17 @@
 ---
 name: token-eater
-description: "[BETA] Burn idle, about-to-expire model-subscription credits on safe, machine-verified maintenance chores. Auto-detects your Claude / Codex / Grok CLIs, runs low-stakes cleanups on a drain-vs-protect posture, and opens draft PRs you review. Manual invocation only during beta."
+description: "[BETA] Spend a subscription's idle, about-to-expire credits on safe, machine-verified cleanup. You pick the service (Grok / Codex / Claude); token-eater finds token-heavy maintenance work the project's own checks can verify — de-slop, dead code, simplification, formatting — does it in isolated worktrees, and opens draft PRs you review. Never merges. Manual invocation only during beta."
 disable-model-invocation: true
-argument-hint: "[setup | run] [provider:<id>] [dry-run]"
+argument-hint: "[grok|codex|claude ...] [dry-run] [setup]"
 ---
 
 # token-eater
 
-Turn the subscription credits you would otherwise let expire into a clean-up crew for your project. token-eater detects which model CLIs you have, finds safe machine-verifiable chores, runs them on whichever provider has idle or expiring capacity, and lands the results as draft PRs you review — never auto-merged.
+Turn the subscription credits you would otherwise let expire into a cleanup crew for your project.
+
+**You point token-eater at a service. It spends that service's credits on safe, token-heavy maintenance work, and hands you draft PRs to review.** The chores it picks are *low-risk* (a deterministic check can prove them correct) but *token-hungry* (lots of model output — de-slop, dead-code removal, DRY/simplification, test backfill) — exactly the work that burns credits without burning your attention. It never merges anything.
+
+The service you choose is the only real setting: it spends what you tell it to and leaves everything else alone. Want to burn expiring Grok credits? `/token-eater grok`. Want Codex to do a cleanup pass? `/token-eater codex`. Don't want it touching your Claude capacity? Just don't list Claude.
 
 This file is the orchestrator. The detailed playbooks live in `references/`; the provider registry is `adapters.yaml`.
 
@@ -15,7 +19,7 @@ This file is the orchestrator. The detailed playbooks live in `references/`; the
 
 ## Status
 
-`[BETA]` — manual invocation only (`disable-model-invocation: true`). Do not wire token-eater into other skills' handoffs during the beta.
+`[BETA]` — manual invocation only (`disable-model-invocation: true`: a human must type `/token-eater`; other skills cannot hand off to it). Do not wire token-eater into other skills' handoffs during the beta.
 
 ## Input
 
@@ -27,52 +31,49 @@ Parse `$ARGUMENTS` for optional tokens; strip each recognized token before inter
 
 | Token | Effect |
 |-------|--------|
-| `setup` | Force the first-run setup flow even if config exists (re-onboard). |
-| `run` | Skip setup and run the harvest loop using saved config. |
-| `provider:<id>` | Restrict this run to one adapter (e.g., `provider:grok`). |
-| `dry-run` | Plan the run — discover chores and show what would happen — without delegating or opening PRs. |
+| `grok` / `codex` / `claude` | Spend this service this run. List more than one to spend them in the order given. Overrides the saved default. |
+| `dry-run` | Plan the run — find the chores and show what would happen — without spending credits or opening PRs. |
+| `setup` | Re-run the (one-question) setup to change the saved default service. |
 
-## Entry: resolve config, then branch
+If no service is named and a saved default exists, use it. If no service is named and there is no config, run the brief setup in `references/setup-and-config.md` (one question: which service's credits should I spend?).
 
-1. **Locate config.** Look for token-eater config (user-scoped, with an optional per-project override). See `references/setup-and-config.md` for the path and schema.
-2. **No config, or the `setup` token → first-run setup.** Run the onboarding flow in `references/setup-and-config.md`: detect adapters, assign drain/protect posture, set the idle window, choose on-demand vs. a recurring schedule, and elicit the run preferences (implementer, intermediate-review mode, review/fix rounds, grok-tapped fallback, review depth). Persist config. If a schedule was chosen, install it per `references/schedule-install.md`.
-   - **Exception — `dry-run` with no config:** do NOT run interactive setup. Use registry defaults (grok = drain, codex/claude = protect) to plan and preview the run, and write nothing. Setup is only for real runs.
-3. **Config present → harvest loop.** Load config and run the loop in `references/harvest-loop.md`.
-4. **No supported adapter installed → stop.** If `scripts/detect-adapters.sh` finds none of the registered CLIs, print a plain-language explanation and exit without changing anything.
+## Entry: resolve the service, then run
 
-## How a harvest run proceeds (overview)
+1. **Detect what's installed.** Run `scripts/detect-adapters.sh`. If it finds none of the registered CLIs, print a plain-language explanation and stop without changing anything.
+2. **Decide which service(s) to spend.** Named services in `$ARGUMENTS` win; otherwise the saved default from config; otherwise run the one-question setup. Keep only services that detection found available.
+3. **`dry-run` → plan only.** Find the chores and show what would happen; spend nothing and write nothing.
+4. **Otherwise → run the loop** in `references/harvest-loop.md`.
+
+## How a run proceeds (overview)
 
 Detail lives in the references; the shape is:
 
-- Detect adapters and read each provider's real balance (reset-aware) when onwatch is present — `references/adapter-contract.md`, `scripts/detect-adapters.sh`, `scripts/onwatch-usage.sh`.
-- Build the eligible chore backlog — only chores a deterministic gate can verify — resolving each archetype to an installed skill, a (stubbed) House of Vibe drop-in, or a bundled prompt — `references/chore-discovery.md`, `skills-catalog.yaml`, `scripts/detect-skills.sh`.
-- For each chore: pick the execution mode. **Deterministic chores** (formatting, lint `--fix`) run the tool directly via `scripts/apply-tool.sh` — no model, no credits, no model-error risk. **Judgment chores** (dead-code, deslop, refactor, tests) route to the cheapest in-tier adapter with harvestable surplus and run via its runner (`scripts/delegate-<adapter>.sh`) — this is where the credit-burn belongs. Before an adapter's first chore, preflight its headless auth with `scripts/check-auth.sh` and never invoke an adapter that could drop into an interactive sign-in prompt. Every chore runs in an isolated worktree, verified by the gate, and is kept or rolled back — `references/harvest-loop.md`, `references/delegation-invocation.md`.
-- Run the optional review/fix pipeline — independence is guaranteed by the always-final frontier review, so the intermediate review may even be grok reviewing itself with subagents — `references/review-pipeline.md`.
-- Land gate-passing changes as draft PRs and summarize in plain language — `references/result-handling.md`.
+- Resolve the service(s) to spend and confirm their CLIs are present — `scripts/detect-adapters.sh`, `references/adapter-contract.md`.
+- Build the chore backlog — only low-risk maintenance work a deterministic gate (the project's own tests / typecheck / lint / formatter / build) can verify — resolving each chore to an installed skill, a (stubbed) House of Vibe drop-in, or a bundled prompt — `references/chore-discovery.md`, `skills-catalog.yaml`, `scripts/detect-skills.sh`.
+- For each chore: **deterministic chores** (formatting, lint `--fix`) run the tool directly via `scripts/apply-tool.sh` — free, no model. **Judgment chores** (de-slop, dead code, simplification, tests) are where the credits go: the chosen service does them via its runner (`scripts/delegate-<service>.sh`). Before a service's first chore, preflight its headless auth with `scripts/check-auth.sh` so a run never hangs on an interactive sign-in. Every chore runs in an isolated worktree, is verified by the gate, and is kept or rolled back — `references/harvest-loop.md`, `references/delegation-invocation.md`, `references/worktree-lifecycle.md`.
+- Land gate-passing changes as draft PRs and summarize in plain language — `references/result-handling.md`. Optionally run one review pass first — `references/review-pipeline.md`.
 
 ## Safety invariants
 
-- Never auto-merge AND never auto-mark-ready — gate-passing work lands as a draft PR; PRs are independently-reviewable slices, and the final frontier review and merge are always the human's.
-- Only delegate chores whose correctness a deterministic gate can verify (tests, type check, lint, formatter idempotency, or build).
-- Never harvest a provider the user is actively using; protect-posture providers are harvested only inside their idle window.
-- Every delegated chore runs in a fresh git worktree; failures roll back without touching the working tree.
+- Never auto-merge AND never auto-mark-ready — gate-passing work lands as a draft PR; the final review and merge are always yours.
+- Only do chores whose correctness a deterministic gate can verify (tests, type check, lint, formatter idempotency, or build).
+- token-eater only spends the service(s) you name (or your saved default). It never reaches for a service you didn't choose.
+- Every chore runs in a fresh git worktree; a failed gate rolls back without touching your working tree.
 
 ## Reference map
 
-| File | Purpose | Plan unit |
-|------|---------|-----------|
-| `adapters.yaml` | Declarative provider registry | U2 |
-| `skills-catalog.yaml` | Chore archetype → skill catalog (installed skills + stubbed HoV drop-ins) | U5 |
-| `references/adapter-contract.md` | The five-field adapter contract + the three v1 adapters + the balance oracle | U2 |
-| `references/setup-and-config.md` | First-run onboarding + config schema + interactive run-config | U3 |
-| `references/delegation-invocation.md` | Per-adapter headless delegation harness + the `delegate-<adapter>.sh` runners | U4 |
-| `references/worktree-lifecycle.md` | Worktree isolation, collision-safe naming, concurrency, and cleanup (`scripts/wt.sh`) | U4 |
-| `references/chore-discovery.md` | Chore discovery + deterministic-gate eligibility + skill-aware resolution | U5 |
-| `references/harvest-loop.md` | Drain/protect posture engine + stop conditions | U6 |
-| `references/review-pipeline.md` | Optional review/fix loop + frontier-review recommendation | U7+ |
-| `references/result-handling.md` | Draft PR + plain-language summary + run ledger | U7 |
-| `references/schedule-install.md` | Cross-platform schedule installer | U8 |
+| File | What it's for |
+|------|---------------|
+| `adapters.yaml` | Provider registry: how to call each service's CLI headlessly |
+| `skills-catalog.yaml` | Chore type → skill catalog (installed skills + stubbed HoV drop-ins) |
+| `references/adapter-contract.md` | The adapter contract + the three v1 adapters + the optional balance signal |
+| `references/setup-and-config.md` | The one-question setup + the small config schema |
+| `references/chore-discovery.md` | Finding gate-verifiable chores + skill-aware resolution |
+| `references/harvest-loop.md` | The run loop: spend the service on each chore until the backlog or the credits run out |
+| `references/delegation-invocation.md` | Per-service headless delegation harness + the `delegate-<service>.sh` runners |
+| `references/worktree-lifecycle.md` | Worktree isolation, collision-safe naming, and cleanup (`scripts/wt.sh`) |
+| `references/result-handling.md` | Draft PR + plain-language summary + run ledger |
+| `references/review-pipeline.md` | **Optional** — run one review pass before the draft PR |
+| `references/schedule-install.md` | **Optional / advanced** — run token-eater on a recurring schedule |
 
-Scripts: `detect-adapters.sh` (registry scan) · `detect-skills.sh` (catalog scan) · `check-auth.sh` (adapter headless-auth preflight) · `onwatch-usage.sh` (balance oracle) · `wt.sh` (worktree create/cleanup/sweep) · `run-gate.sh` (deterministic gate) · `apply-tool.sh` (deterministic tool chores) · `delegate-{grok,codex,claude}.sh` (per-adapter model runners).
-
-The full plan is at `docs/plans/2026-06-26-001-feat-token-eater-credit-harvester-plan.md`.
+Scripts: `detect-adapters.sh` (which CLIs are installed) · `detect-skills.sh` (chore catalog scan) · `check-auth.sh` (service headless-auth preflight) · `onwatch-usage.sh` (optional balance reader) · `wt.sh` (worktree create/cleanup/sweep) · `run-gate.sh` (deterministic gate) · `apply-tool.sh` (deterministic tool chores, free) · `delegate-{grok,codex,claude}.sh` (per-service runners).
