@@ -16,11 +16,16 @@
 #   detect          how to detect it: "claude-skill:<name>" | "grok-skill:<name>" | "cmd:<bin>"
 #                   (space-separated alternatives all count as present if any match)
 #   hov_dropin      the productized House of Vibe skill id to suggest when nothing is installed (or null)
+#   exec            "tool" | "model" (default "model"). tool = a deterministic fixer does it perfectly
+#                   (formatter, lint --fix) -> run it directly via scripts/apply-tool.sh, NO model, NO
+#                   credits, no model-error risk. model = real judgment needed -> delegate to an adapter
+#                   (this is where the grok credit-burn belongs).
 #   status          installed-or-bundled resolution is computed at runtime; this is the catalog default
 
 archetypes:
   - archetype: formatter-idempotency
     tier: mechanical
+    exec: tool                        # deterministic — run the formatter (prettier/ruff/biome/gofmt), no model
     gate: "run formatter twice, diff must be empty"
     existing_skill: null
     detect: "cmd:prettier cmd:ruff cmd:biome cmd:gofmt"
@@ -29,6 +34,7 @@ archetypes:
 
   - archetype: lint-autofix
     tier: mechanical
+    exec: tool                        # deterministic — run the linter's --fix (eslint/ruff/biome), no model
     gate: "linter exits clean"
     existing_skill: null
     detect: "cmd:ruff cmd:eslint cmd:biome cmd:clippy"
