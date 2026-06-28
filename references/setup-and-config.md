@@ -52,7 +52,7 @@ Field meanings:
 | `stop_when_low` | Optional balance guard, e.g. `"20%"`. Only has effect when onwatch is available (`scripts/onwatch-usage.sh`); otherwise the run simply continues until each service's circuit breaker fires. |
 | `result_dir` | Repo-relative directory for run artifacts and the ledger. Defaults to `.token-eater/runs`. |
 
-Anything not listed here (old `posture`, `tier`, `idle_window`, `reserve_floor`, `run_config`, `schedule` keys from schema v1) is obsolete. If you load a v1 config, treat its `providers[].id` list as the new `services` list, ignore the rest, and offer to re-run setup to write a clean v2 file.
+Anything not listed here (old `posture`, `tier`, `idle_window`, `reserve_floor`, `run_config`, `schedule` keys from schema v1) is obsolete. **Loading a v1 config is non-blocking:** read its `providers[].id` list, in order, as the new `services` list (so a v1 file with grok, codex, claude becomes `services: [grok, codex, claude]`), ignore every other key, and proceed with the run. Do not stop to migrate. Add one line to the run summary offering `/token-eater setup` to write a clean v2 file when convenient.
 
 ## Round-trip behavior
 

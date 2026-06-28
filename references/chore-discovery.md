@@ -15,6 +15,8 @@ A candidate chore is eligible only when all of these are true:
 5. The chore is not security-sensitive, architectural, speculative, or dependent on unstated product intent.
 6. The chosen gate is GREEN on the unmodified worktree at HEAD (baseline). A gate that already fails before the chore runs cannot prove the chore is safe: a later failure can't be attributed to the chore, and a broken or mis-configured gate (for example a `lint` script with no config in the project) must never be trusted. If the chosen gate is red at baseline, either fall back to a different gate that is green at baseline, or exclude the chore and say so plainly.
 
+Chores run on committed state: the worktree branches from `HEAD` (a committed ref), so any uncommitted changes in your working tree are excluded from the chore and left untouched. Evaluate the baseline gate on that same committed state, not on a dirty tree, so the result is reproducible.
+
 Allowed gate types are:
 
 - Formatter idempotency or formatter check.
