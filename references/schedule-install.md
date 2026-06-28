@@ -1,6 +1,8 @@
-# Schedule install
+# Schedule install (optional / advanced)
 
-Schedule install is optional setup work. When the user chooses recurring runs, install a platform-native schedule that invokes token-eater headlessly against saved config inside the chosen idle window (R22). If the environment is unsupported or locked down, emit a copy-paste snippet and instructions instead of failing the setup flow.
+> **This is optional.** The default token-eater workflow is on-demand — just type `/token-eater grok` whenever you want a cleanup pass. Recurring scheduling is an advanced option for users who want token-eater to run automatically.
+
+Schedule install sets up a platform-native recurring task that invokes token-eater headlessly against your saved config. If the environment is unsupported or locked down, emit a copy-paste snippet and instructions instead of failing the setup flow.
 
 The scheduled command uses the `run` token so later invocations skip onboarding:
 
@@ -15,7 +17,7 @@ Run it from the target repository root so token-eater can find the project, `.to
 Read these from setup/config before installing:
 
 - Repository root where token-eater should run.
-- Idle window start/end and timezone from `idle_window`.
+- Desired run time (default: 03:00 local time daily — pick a time when you are not actively working).
 - Schedule mode: install only when `schedule.mode: recurring`.
 - Desired native id, or use the default id `token-eater`.
 - Headless command, defaulting to `claude -p "/token-eater run"`.
@@ -29,7 +31,7 @@ command: claude -p "/token-eater run"
 id: token-eater
 ```
 
-Adjust paths and times to the saved config. Prefer the user's local timezone. Do not install a schedule outside the protect-provider idle window.
+Adjust paths and times to the user's preference. Prefer the user's local timezone.
 
 ## Platform detection
 
@@ -306,7 +308,7 @@ Do not pretend a recurring schedule exists.
 1. Confirm saved config exists and round-trips per `references/setup-and-config.md`.
 2. Confirm `claude` is available with `command -v claude` or the platform equivalent. If unavailable, emit snippets; the schedule cannot run the skill without it.
 3. Resolve the repository root to an absolute path.
-4. Choose a single run time inside the idle window. Default to the midpoint of the window, or `03:00` when using the default `22:00` to `07:00` window.
+4. Choose a single run time. Default to `03:00` local time, or the user's preferred off-hours time.
 5. Detect platform and scheduler capability.
 6. Generate the native entry with absolute paths and the command `claude -p "/token-eater run"`.
 7. Install and verify the entry using the platform commands above.
@@ -338,7 +340,7 @@ When the user asks to remove the recurring schedule:
 
 ## Safety notes
 
-- Scheduling only starts token-eater; the harvest loop still enforces protect-provider idle windows, active-use guards, reserve floors when an oracle exists, deterministic gates, and draft PR only behavior.
+- Scheduling only starts token-eater; the run loop still enforces deterministic gates, draft-PR-only behavior, and never auto-merges anything.
 - Do not store credentials in scheduler entries.
 - Do not install a system-wide schedule when a user-level scheduler is available.
 - Do not install duplicate entries. Replace the existing `token-eater` entry for the same scheduler id.

@@ -1,16 +1,14 @@
 # token-eater skill catalog
 #
 # Maps gate-verifiable chore archetypes to the skills that perform them. Chore-discovery
-# (U5) uses this to: DETECT an installed skill and use it; else SUGGEST a House of Vibe
+# uses this to: DETECT an installed skill and use it; else SUGGEST a House of Vibe
 # drop-in (stubbed — not built yet); else fall back to token-eater's BUNDLED prompt.
 #
 # Only gate-verifiable code chores belong here. High-stakes work (bug hunts, deadlocks,
-# security audits) is deliberately excluded — it stays with Claude / a human, never a
-# cheap-model unsupervised run.
+# security audits) is deliberately excluded — it stays with Claude / a human.
 #
 # entry fields:
 #   archetype       chore type
-#   tier            mechanical | standard | high | review-only
 #   gate            the deterministic gate that verifies this chore (or "none" = review-only)
 #   existing_skill  a skill already on this machine that does it (or null)
 #   detect          how to detect it: "claude-skill:<name>" | "grok-skill:<name>" | "cmd:<bin>"
@@ -18,13 +16,12 @@
 #   hov_dropin      the productized House of Vibe skill id to suggest when nothing is installed (or null)
 #   exec            "tool" | "model" (default "model"). tool = a deterministic fixer does it perfectly
 #                   (formatter, lint --fix) -> run it directly via scripts/apply-tool.sh, NO model, NO
-#                   credits, no model-error risk. model = real judgment needed -> delegate to an adapter
-#                   (this is where the grok credit-burn belongs).
+#                   credits, no model-error risk. model = real judgment needed -> delegate to the service
+#                   you chose (this is where the credit-burn belongs).
 #   status          installed-or-bundled resolution is computed at runtime; this is the catalog default
 
 archetypes:
   - archetype: formatter-idempotency
-    tier: mechanical
     exec: tool                        # deterministic — run the formatter (prettier/ruff/biome/gofmt), no model
     gate: "run formatter twice, diff must be empty"
     existing_skill: null
@@ -33,7 +30,6 @@ archetypes:
     notes: "bundled — token-eater drives the formatter directly; safest starter chore"
 
   - archetype: lint-autofix
-    tier: mechanical
     exec: tool                        # deterministic — run the linter's --fix (eslint/ruff/biome), no model
     gate: "linter exits clean"
     existing_skill: null
@@ -42,7 +38,6 @@ archetypes:
     notes: "bundled"
 
   - archetype: dead-code-removal
-    tier: mechanical
     gate: "tests + typecheck pass; removed symbols have no references"
     existing_skill: ce-simplify-code
     detect: "claude-skill:ce-simplify-code"
@@ -50,7 +45,6 @@ archetypes:
     notes: "validated end-to-end on marketplace-deal-sniper#4"
 
   - archetype: isomorphic-simplify
-    tier: standard
     gate: "full test suite passes unchanged (behavior preserved)"
     existing_skill: simplify-and-refactor-code-isomorphically
     detect: "claude-skill:simplify-and-refactor-code-isomorphically"
@@ -58,7 +52,6 @@ archetypes:
     notes: "isomorphic = the tests ARE the gate"
 
   - archetype: de-monolithize
-    tier: standard
     gate: "full test suite passes unchanged"
     existing_skill: de-monolithize-your-codebase-isomorphically
     detect: "claude-skill:de-monolithize-your-codebase-isomorphically"
@@ -66,7 +59,6 @@ archetypes:
     notes: "split large modules without behavior change"
 
   - archetype: mock-removal
-    tier: standard
     gate: "tests pass with the mock removed or replaced"
     existing_skill: mock-code-finder
     detect: "claude-skill:mock-code-finder"
@@ -74,20 +66,18 @@ archetypes:
     notes: "remove dead/placeholder mock code"
 
   - archetype: optimize
-    tier: high
     gate: "tests pass AND a perf benchmark is not regressed"
     existing_skill: extreme-software-optimization
     detect: "claude-skill:extreme-software-optimization"
     hov_dropin: hov-optimize
-    notes: "riskier — needs a perf gate; high tier, off by default for unsupervised cheap-model runs"
+    notes: "admitted only when a perf-benchmark gate exists in the project; skip otherwise"
 
   - archetype: prose-deslop
-    tier: review-only
     gate: "none — no machine gate; relies on the draft PR + frontier/human review"
     existing_skill: de-slopify
     detect: "claude-skill:de-slopify"
     hov_dropin: hov-deslop
-    notes: "README/docs only; runs ONLY when the user opts into review-only mode (relaxes the deterministic-gate rule)"
+    notes: "README/docs only; review-only — runs ONLY when the user opts into review-only mode (relaxes the deterministic-gate rule)"
 
 # House of Vibe drop-in registry — STUBBED. These productized skills are NOT built yet.
 # When an archetype above has no installed skill, token-eater suggests its hov_dropin.

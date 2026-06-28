@@ -3,8 +3,8 @@
 #
 # claude enforces the schema and returns it in the stdout envelope's
 # .structured_output (reliable). The envelope also reports .total_cost_usd and
-# .usage, so this adapter can self-meter spend (useful for protect posture with no
-# oracle). files_modified + scope are still derived from git (ground truth); the
+# .usage, so this adapter can self-meter spend (useful when no balance oracle is
+# present). files_modified + scope are still derived from git (ground truth); the
 # deterministic gate stays authoritative for keep/rollback.
 #
 # Usage:

@@ -45,7 +45,6 @@ run_id: token-eater-20260627-030000-grok-format
 chore_id: formatter-idempotency-001
 chore_title: Make formatter check pass
 provider: grok
-provider_posture: drain
 worktree: ../token-eater-token-eater-20260627-030000-grok-format
 branch: token-eater/token-eater-20260627-030000-grok-format
 gate:
@@ -151,7 +150,7 @@ Do not create a PR or branch result for these outcomes:
 - Malformed or missing result JSON.
 - Adapter returned `status: failed`.
 - Deterministic gate failed.
-- Chore skipped because no provider had harvestable surplus.
+- Chore skipped because all requested services are parked (credits exhausted, needs-reauth, or repeated failures).
 - Chore skipped because no deterministic gate existed.
 
 For a gate failure, `references/delegation-invocation.md` rolls back the worktree and deletes the temporary branch. Result handling only records the failure and adds a plain summary sentence. This is the AE4 path: worktree rolled back, no PR opened, working tree untouched.
@@ -161,7 +160,7 @@ For a gate failure, `references/delegation-invocation.md` rolls back the worktre
 Append one compact JSON object per chore attempt to `.token-eater/runs/ledger.jsonl`:
 
 ```json
-{"timestamp":"2026-06-27T03:00:00Z","run_id":"token-eater-20260627-030000-grok-format","chore_id":"formatter-idempotency-001","chore_title":"Make formatter check pass","provider":"grok","posture":"drain","gate_outcome":"pass","gate_command":"pnpm exec prettier --check .","adapter_status":"completed","spend_estimate":"unknown","result_ref":"https://github.com/acme/app/pull/123","files_modified":["src/example.ts"],"issues":[]}
+{"timestamp":"2026-06-27T03:00:00Z","run_id":"token-eater-20260627-030000-grok-format","chore_id":"formatter-idempotency-001","chore_title":"Make formatter check pass","provider":"grok","gate_outcome":"pass","gate_command":"pnpm exec prettier --check .","adapter_status":"completed","spend_estimate":"unknown","result_ref":"https://github.com/acme/app/pull/123","files_modified":["src/example.ts"],"issues":[]}
 ```
 
 Required fields:
@@ -171,8 +170,7 @@ Required fields:
 | `timestamp` | UTC ISO-8601 time when the outcome was recorded. |
 | `run_id` | Stable id from the delegation harness. |
 | `chore_id` / `chore_title` | Backlog identity from `references/chore-discovery.md`. |
-| `provider` | Adapter id, or `none` for a skipped chore that never delegated. |
-| `posture` | `drain`, `protect`, or `none`. |
+| `provider` | Service id (e.g. `grok`), `tool` for a free tool chore, or `none` for a chore that never ran. |
 | `gate_outcome` | `pass`, `fail`, `not_run`, or `skipped`. |
 | `gate_command` | The command intended or run; `null` only for skipped ungated candidates. |
 | `adapter_status` | `completed`, `partial`, `failed`, `cli_failure`, `malformed`, or `not_run`. |
@@ -195,7 +193,7 @@ When opening a draft PR, write `.token-eater/runs/<run-id>/pr-body.md` with:
 ## Why token-eater picked this
 
 - The chore had a deterministic gate: `<gate command>`.
-- Provider used: `<provider>` (`<posture>` posture).
+- Service used: `<provider>`.
 
 ## Verification
 
@@ -224,9 +222,8 @@ Needs review:
 
 Skipped:
 - Skipped dependency updates because this project has no test or build gate to verify them.
-- Skipped Claude because it looked active and is protected.
 
-Capacity used:
+Credits spent:
 - grok handled one cleanup. Spend estimate: unknown.
 ```
 
@@ -234,7 +231,8 @@ Use everyday language:
 
 - Say "formatted files" instead of "formatter idempotency chore".
 - Say "the safety check failed, so I threw away that attempt" instead of "gate red caused rollback".
-- Say "no spare model capacity was available" instead of "no routeable provider met posture constraints".
+- Say "grok's credits ran out, so I stopped" instead of "circuit breaker matched, service parked".
+- Say "nothing eligible was found to clean up" if the backlog was empty.
 
 Always include whether there is anything to review. If nothing changed, say that no PR or branch was created.
 

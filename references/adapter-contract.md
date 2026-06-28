@@ -2,36 +2,27 @@
 
 An **adapter** is the thin description of one model CLI that token-eater can delegate to. Adapters live as entries in `adapters.yaml`. The harvest loop reads them generically, so adding a provider is a registry entry, never a change to the loop (R3).
 
-## The contract (five load-bearing fields + routing metadata)
+## The contract (five load-bearing fields)
 
 Each adapter declares:
 
 1. **invoke** — the headless invocation template, run with the worktree as cwd (so no `--cwd` is needed). token-eater substitutes shell-escaped placeholders: `{prompt_file}` / `{prompt_text}` (prompt as a path or inline string), `{schema_file}` / `{schema_json}` (schema as a path or inline string), and `{result_file}` (where the adapter writes its result). Each adapter uses whichever form its CLI expects — they differ. The call must be non-interactive and must not open a TUI.
-2. **reset_cadence** — how the subscription's quota resets. Informational for drain providers; for protect providers it informs the idle-window / pre-reset timing.
-3. **balance_signal** — `none`, or the name of an oracle that can report remaining budget. Optional by design: most providers expose no headless balance, so `none` is a first-class value. A protect provider with `none` is harvested conservatively (idle window only); a future signal drops in here with no loop change (R10, R11).
-4. **strength_tier** — the highest chore tier the adapter is trusted for: `mechanical`, `standard`, or `high`. Routing never sends a chore to an adapter whose tier is below the chore's tier.
-5. **circuit_breaker** — a regex that matches the CLI's rate-limit / credit-exhaustion output. When it fires, the provider is parked for the run (R16); for a drain provider this regex doubling as the "blow through until it refuses" stop signal (R8).
-
-Plus two routing fields:
-
-- **default_posture** — `drain` or `protect` (R7). The setup flow proposes this; the user can override. A provider whose credits do not expire must never be `drain`.
-- **cost_rank** — integer, lower is cheaper. Among adapters whose tier covers a chore, routing picks the lowest `cost_rank` with harvestable surplus (R6).
-
-A sixth field, **structured_output**, names the flag/mechanism that constrains the CLI to emit the 5-field result schema (`status`, `files_modified`, `issues`, `summary`, `verification_summary`) consumed by the delegation harness (see `delegation-invocation.md`).
-
-A seventh field, **result_capture**, tells the harness *where* that result is — `file:{result_file}` when the CLI writes it to a file (codex), or `stdout:<field>` when the result lives in a field of the CLI's stdout JSON envelope (grok's `.structuredOutput`, claude's `.structured_output`).
+2. **structured_output** — names the flag/mechanism that constrains the CLI to emit the 5-field result schema (`status`, `files_modified`, `issues`, `summary`, `verification_summary`) consumed by the delegation harness (see `delegation-invocation.md`).
+3. **result_capture** — tells the harness *where* that result is — `file:{result_file}` when the CLI writes it to a file (codex), or `stdout:<field>` when the result lives in a field of the CLI's stdout JSON envelope (grok's `.structuredOutput`, claude's `.structured_output`).
+4. **circuit_breaker** — a regex that matches the CLI's rate-limit / credit-exhaustion output. When it fires, the service is parked for the run. For the service you are draining, this regex is the normal "credits all spent" stop — not an error.
+5. **balance_signal** — optional. `none` or the name of an oracle that can report remaining budget. Only the advanced `stop_when_low` setting reads it (via `scripts/onwatch-usage.sh`). A service with no balance signal simply runs until the circuit breaker fires or the backlog empties — that is the common, default case.
 
 ## The three v1 adapters
 
-| id | tier | posture | cost | prompt input | schema | result | file-edit flag |
-|----|------|---------|------|--------------|--------|--------|----------------|
-| `grok` | mechanical | drain | 1 | `--prompt-file` | `--json-schema` (soft) | stdout `.structuredOutput` | `--always-approve` |
-| `codex` | high | protect | 2 | stdin (`- <`) | `--output-schema` (hard) | `-o` file | `-s workspace-write` |
-| `claude` | high | protect | 3 | `-p "<text>"` | `--json-schema` (hard) | stdout `.structured_output` | `--permission-mode acceptEdits` |
+| id | prompt input | schema | result | file-edit flag |
+|----|--------------|--------|--------|----------------|
+| `grok` | `--prompt-file` | `--json-schema` (soft) | stdout `.structuredOutput` | `--always-approve` |
+| `codex` | stdin (`- <`) | `--output-schema` (hard) | `-o` file | `-s workspace-write` |
+| `claude` | `-p "<text>"` | `--json-schema` (hard) | stdout `.structured_output` | `--permission-mode acceptEdits` |
 
-- **grok** is the safe first adapter: pure expiring surplus, mechanical tier, run drain. Its `--json-schema` is *soft* — the prompt must ask for the result schema, and `structuredOutput` can come back `null`; the deterministic gate, not the result JSON, is the real safety net.
-- **codex** reuses the established `codex exec --output-schema` contract; it needs `-s workspace-write` to edit files in the worktree. Protect, high tier.
-- **claude** runs the user's own primary capacity; protect, high tier. `claude -p --output-format json --json-schema` enforces the schema, and its envelope additionally reports `total_cost_usd` and `usage` (usable for spend self-metering).
+- **grok**: its `--json-schema` is *soft* — the prompt must ask for the result schema, and `structuredOutput` can come back `null`; the deterministic gate, not the result JSON, is the real safety net.
+- **codex**: reuses the established `codex exec --output-schema` contract; needs `-s workspace-write` to edit files in the worktree.
+- **claude**: `claude -p --output-format json --json-schema` enforces the schema, and its envelope additionally reports `total_cost_usd` and `usage` (usable for spend self-metering).
 
 ### Verified headless contracts (2026-06-27)
 
@@ -43,16 +34,16 @@ Confirmed against the installed CLIs with live calls; these resolve the former `
 
 The placeholder substitution differs per adapter (path vs. inline string; stdin vs. arg) — see `adapters.yaml` and the `result_capture` field.
 
-### Balance oracle — `scripts/onwatch-usage.sh` (2026-06-27)
+### Balance signal — `scripts/onwatch-usage.sh` (2026-06-27)
 
-token-eater reads real credit/quota balances from **onwatch** when it is running. `onwatch-usage.sh <provider>` returns `{util_percent, resets_at, status}` and exits 3 when onwatch is absent (the common member case), so the loop falls back to spend-tracking / drain (R10). Sources: **grok** from onwatch's SQLite DB (`~/.onwatch/data/onwatch.db`, table `grok_quota_values`); **anthropic / codex** from onwatch's open Prometheus `/metrics` (seven-day window). This gives every adapter a reserve-floor and reset-aware signal on a power-user machine; grok stays drain posture but now with *visibility* (how much surplus remains, when it resets — verified: grok 11%, resets 2026-07-01).
+token-eater can optionally read credit/quota balances from **onwatch** when it is running, to support the `stop_when_low` setting. `onwatch-usage.sh <provider>` returns `{util_percent, resets_at, status}` and exits 3 when onwatch is absent (the common member case) — the run just continues until the circuit breaker fires. Sources: **grok** from onwatch's SQLite DB (`~/.onwatch/data/onwatch.db`, table `grok_quota_values`); **anthropic / codex** from onwatch's open Prometheus `/metrics` (seven-day window). Verified: grok 11%, resets 2026-07-01.
 
 **Self-contained (no-onwatch) grok balance — finding, not yet built.** onwatch itself polls grok credits via the gRPC method `grok.com/grok_api_v2.GrokBuildBilling/GetGrokCredits` (`application/grpc-web+proto`), authenticated with the bearer token in `~/.grok/auth.json` (`.key` field). Replicating it directly — so members without onwatch get a native grok balance — needs the request message `.proto` shape: the empty-message call returns `grpc-status 12` (unimplemented). Tracked as a follow-up.
 
 ## Detection
 
-`scripts/detect-adapters.sh` reads the registry, runs `command -v` for each `id`, and reports which adapters are available with their default posture and cost rank. With none available, token-eater stops and changes nothing (R4).
+`scripts/detect-adapters.sh` reads the registry, runs `command -v` for each `id`, and reports which adapters are available. With none available, token-eater stops and changes nothing (R4).
 
 ## Adding a provider
 
-Append an entry to `adapters.yaml` with all contract fields. Pick `strength_tier` conservatively (a weaker model earns higher tiers only after the eval harness shows it clears the gate reliably), set `default_posture` by whether its credits expire, and confirm the headless contract with the U4 preflight before first use. No loop code changes (R3).
+Append an entry to `adapters.yaml` with all contract fields (`id`, `invoke`, `structured_output`, `result_capture`, `circuit_breaker`, and optionally `balance_signal`). Confirm the headless contract with the one-time preflight in `references/delegation-invocation.md` before first use. No loop code changes (R3).
