@@ -52,6 +52,10 @@ PY
     printf 'ready\tClaude runs through your current session.\n'; exit 0 ;;
 
   codex)
+    # By design, codex preflight is ALWAYS 'unknown' (exit 2): headless codex runs route
+    # through the local ccflare proxy, whose health cannot be probed from the auth file.
+    # A proxy outage is caught by the circuit breaker at invocation time. Signed-in vs not
+    # only changes the message, never the exit code — do not expect 0/3 here.
     f="$HOME/.codex/auth.json"
     if [ -f "$f" ]; then
       printf 'unknown\tCodex is signed in, but headless runs route through the local proxy; a proxy outage blocks Codex (handled by the circuit breaker).\n'

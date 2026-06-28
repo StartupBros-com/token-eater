@@ -5,7 +5,9 @@
 #   bundled               -> token-eater drives it directly with a bundled prompt / tool
 #   missing               -> nothing installed and no drop-in; skip the archetype
 #
-# Output: one TSV line per archetype: <status>\t<archetype>\t<tier-or-detail>
+# Output: one TSV line per archetype: <status>\t<archetype>\t<skill-or-detail>\t<exec>
+#   exec is "tool" (deterministic fixer, no model/credits) or "model" (delegate to an adapter),
+#   read straight from skills-catalog.yaml so the harvest loop need not re-parse the catalog.
 # Dependency-free (awk + filesystem + command -v). Skills are detected by filesystem
 # presence so it works for House of Vibe members, not just this machine.
 set -euo pipefail
@@ -25,18 +27,21 @@ grok_skill_present() { [ -d "$HOME/.grok/skills/$1" ]; }
 # Extract archetype / detect / hov_dropin per block from the (flat-list) catalog.
 parse_catalog() {
   awk '
-    /^[[:space:]]*-[[:space:]]*archetype:/ { if (a!="") print a "\t" d "\t" h; a=$0; sub(/.*archetype:[[:space:]]*/,"",a); d=""; h="" }
+    function flush() { if (a!="") print a "\t" d "\t" h "\t" (e==""?"model":e) }
+    /^[[:space:]]*-[[:space:]]*archetype:/ { flush(); a=$0; sub(/.*archetype:[[:space:]]*/,"",a); d=""; h=""; e="" }
     /^[[:space:]]*detect:/     { d=$0; sub(/.*detect:[[:space:]]*/,"",d); gsub(/"/,"",d) }
     /^[[:space:]]*hov_dropin:/ { h=$0; sub(/.*hov_dropin:[[:space:]]*/,"",h); gsub(/"/,"",h) }
-    /^hov_registry:/ { if (a!="") { print a "\t" d "\t" h; a="" } }   # stop at the registry section
-    END { if (a!="") print a "\t" d "\t" h }
+    /^[[:space:]]*exec:/       { e=$0; sub(/.*exec:[[:space:]]*/,"",e); sub(/[[:space:]]*#.*/,"",e); gsub(/[" ]/,"",e) }
+    /^hov_registry:/ { flush(); a=""; d=""; h=""; e="" }   # stop at the registry section
+    END { flush() }
   ' "$CAT"
 }
 
-while IFS=$'\t' read -r arch detect hov; do
+while IFS=$'\t' read -r arch detect hov xmode; do
   [ -n "$arch" ] || continue
+  xmode="${xmode:-model}"
   if [ -z "$detect" ] || [ "$detect" = "null" ]; then
-    printf 'bundled\t%s\t-\n' "$arch"; continue
+    printf 'bundled\t%s\t-\t%s\n' "$arch" "$xmode"; continue
   fi
   present=0
   for tok in $detect; do
@@ -48,10 +53,10 @@ while IFS=$'\t' read -r arch detect hov; do
     esac
   done
   if [ "$present" = 1 ]; then
-    printf 'installed\t%s\t%s\n' "$arch" "$name"
+    printf 'installed\t%s\t%s\t%s\n' "$arch" "$name" "$xmode"
   elif [ -n "$hov" ] && [ "$hov" != "null" ]; then
-    printf 'hov-dropin-available\t%s\t%s\n' "$arch" "$hov"
+    printf 'hov-dropin-available\t%s\t%s\t%s\n' "$arch" "$hov" "$xmode"
   else
-    printf 'missing\t%s\t-\n' "$arch"
+    printf 'missing\t%s\t-\t%s\n' "$arch" "$xmode"
   fi
 done < <(parse_catalog)

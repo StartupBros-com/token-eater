@@ -48,12 +48,16 @@ first_existing() {
 detect_node_gate() {
   [ -f package.json ] || return 1
 
+  # Prefer specific/cheap checks, then correctness gates; demote bare `lint` BELOW them.
+  # `lint` is a style gate and is frequently mis- or un-configured (e.g. an `eslint` script
+  # with no config in the project) — a broken lint script must never mask a working
+  # test/typecheck/build gate that actually verifies the chore preserved behavior.
   if has_package_script format:check; then echo "pnpm format:check"; return 0; fi
   if has_package_script check:format; then echo "pnpm check:format"; return 0; fi
-  if has_package_script lint; then echo "pnpm lint"; return 0; fi
   if has_package_script typecheck; then echo "pnpm typecheck"; return 0; fi
   if has_package_script test; then echo "pnpm test"; return 0; fi
   if has_package_script build; then echo "pnpm build"; return 0; fi
+  if has_package_script lint; then echo "pnpm lint"; return 0; fi
 
   if [ -f biome.json ] && has_cmd pnpm; then echo "pnpm exec biome check ."; return 0; fi
   if first_existing eslint.config.js eslint.config.mjs eslint.config.cjs .eslintrc .eslintrc.js .eslintrc.cjs .eslintrc.json >/dev/null && has_cmd pnpm; then

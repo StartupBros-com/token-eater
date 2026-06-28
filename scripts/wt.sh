@@ -42,10 +42,14 @@ cmd_create() {
   local branch="token-eater/${run_id}-${slug}"
   local wt="$repo/$WORKTREE_SUBDIR/te-${run_id}-${slug}"
 
-  # keep the worktree dir out of the index (idempotent)
-  if ! { [ -f "$repo/.gitignore" ] && grep -qF "$WORKTREE_SUBDIR" "$repo/.gitignore"; }; then
-    printf '%s\n' "$WORKTREE_SUBDIR/" >> "$repo/.gitignore" 2>/dev/null || true
-  fi
+  # keep the worktree dir AND the run-artifact dir out of the index (idempotent), so a
+  # member's `git add .` can never stage worktrees or run artifacts (prompt/schema/result/
+  # gate logs under .token-eater/runs/) into a chore PR.
+  for ig in "$WORKTREE_SUBDIR/" ".token-eater/"; do
+    if ! { [ -f "$repo/.gitignore" ] && grep -qF "$ig" "$repo/.gitignore"; }; then
+      printf '%s\n' "$ig" >> "$repo/.gitignore" 2>/dev/null || true
+    fi
+  done
 
   # branch from a COMMITTED ref (never the dirty working tree) so main is untouched
   with_lock "$repo" git -C "$repo" worktree add -q -b "$branch" "$wt" "$base" \
@@ -86,8 +90,14 @@ cmd_cleanup() {
 }
 
 default_branch() {
-  git -C "$1" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' \
-    || echo main
+  local b
+  b="$(git -C "$1" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
+  # `git symbolic-ref` can exit 0 with EMPTY output when origin/HEAD is unset (common on
+  # repos set up via `git remote add` rather than `git clone`), so a trailing `|| echo main`
+  # never fires. Probe the actual remote refs locally (no network) before defaulting.
+  [ -z "$b" ] && git -C "$1" show-ref --verify -q refs/remotes/origin/main   && b=main
+  [ -z "$b" ] && git -C "$1" show-ref --verify -q refs/remotes/origin/master && b=master
+  echo "${b:-main}"
 }
 
 cmd_sweep() {

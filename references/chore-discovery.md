@@ -13,6 +13,7 @@ A candidate chore is eligible only when all of these are true:
 3. The gate is relevant to the changed files, not merely present somewhere in the project.
 4. The chore can be scope-fenced to an explicit file list for delegation.
 5. The chore is not security-sensitive, architectural, speculative, or dependent on unstated product intent.
+6. The chosen gate is GREEN on the unmodified worktree at HEAD (baseline). A gate that already fails before the chore runs cannot prove the chore is safe: a later failure can't be attributed to the chore, and a broken or mis-configured gate (for example a `lint` script with no config in the project) must never be trusted. If the chosen gate is red at baseline, either fall back to a different gate that is green at baseline, or exclude the chore and say so plainly.
 
 Allowed gate types are:
 
@@ -37,8 +38,10 @@ scripts/detect-skills.sh
 The detector prints one TSV row per catalog archetype:
 
 ```text
-<status>    <archetype>    <skill-or-detail>
+<status>    <archetype>    <skill-or-detail>    <exec: tool|model>
 ```
+
+The fourth column is the execution mode: `tool` chores run a deterministic fixer with no model and no credits; `model` chores route to an adapter. Read the mode from this column rather than re-parsing `skills-catalog.yaml`.
 
 Statuses mean:
 
@@ -115,6 +118,8 @@ For formatter and lint debt, prefer the project's own script or target over an a
 
 This is not just style. Project scripts encode the repo's real globs, package boundaries, ignore files, and framework path conventions. A root-level ad-hoc command such as `pnpm exec prettier --check .` can misread framework paths like Next.js route groups `(group)` or dynamic routes `[param]`, or scan files the project intentionally excludes, producing false signals. Use the per-package or project-owned gate as both the discovery signal and the chore's gate whenever it exists.
 
+**Discover with the project's globs; fix by explicit file list.** Using the project's own *check* to find debt is correct — it honors the repo's ignore files and config, so the reported debt set is true. But do not assume the project's own *write* script will fix exactly that set. A script such as `prettier --write src/**/*.ts` depends on shell glob expansion, and without `shopt -s globstar` bash collapses `**` to `*`, silently skipping files directly under `src/` (e.g. `src/index.ts`) and leaving the gate red for a reason a member cannot see. So: (1) DISCOVER the dirty set with the project's check, capturing the exact list of files it reports; (2) FIX by passing that explicit file list to the formatter (`pnpm exec prettier --write <those files>`) rather than re-running a glob that may miss files; (3) GATE by re-checking exactly those files. This keeps the project's correct ignore/config behavior while guaranteeing every discovered file is actually fixed. If the check reports zero debt, there is no chore.
+
 Ad-hoc tool commands are fallback only after checking for project-owned scripts/targets and local tool config. When falling back, keep the file list explicit and quote paths safely.
 
 ## Bundled safe-chore set
@@ -152,10 +157,10 @@ Each admitted chore should be represented in prose or YAML with these fields bef
   title: Make formatter check pass
   tier: mechanical
   exec: tool
-  fixer_command: "pnpm format"
+  fixer_command: "pnpm exec prettier --write src/example.ts README.md"   # explicit dirty files from the check — never a bare glob (see "Prefer the project's own scripts")
   gate:
     type: formatter
-    command: "scripts/run-gate.sh <worktree> 'pnpm format:check'"
+    command: "scripts/run-gate.sh <worktree> 'pnpm exec prettier --check src/example.ts README.md'"
   allowed_files:
     - src/example.ts
     - README.md
