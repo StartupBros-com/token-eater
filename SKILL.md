@@ -46,7 +46,7 @@ Detail lives in the references; the shape is:
 
 - Detect adapters and read each provider's real balance (reset-aware) when onwatch is present — `references/adapter-contract.md`, `scripts/detect-adapters.sh`, `scripts/onwatch-usage.sh`.
 - Build the eligible chore backlog — only chores a deterministic gate can verify — resolving each archetype to an installed skill, a (stubbed) House of Vibe drop-in, or a bundled prompt — `references/chore-discovery.md`, `skills-catalog.yaml`, `scripts/detect-skills.sh`.
-- For each chore: route to the cheapest in-tier adapter with harvestable surplus, run it in an isolated worktree via its runner (`scripts/delegate-<adapter>.sh`), verify with the gate, and keep or roll back — `references/harvest-loop.md`, `references/delegation-invocation.md`.
+- For each chore: pick the execution mode. **Deterministic chores** (formatting, lint `--fix`) run the tool directly via `scripts/apply-tool.sh` — no model, no credits, no model-error risk. **Judgment chores** (dead-code, deslop, refactor, tests) route to the cheapest in-tier adapter with harvestable surplus and run via its runner (`scripts/delegate-<adapter>.sh`) — this is where the credit-burn belongs. Before an adapter's first chore, preflight its headless auth with `scripts/check-auth.sh` and never invoke an adapter that could drop into an interactive sign-in prompt. Every chore runs in an isolated worktree, verified by the gate, and is kept or rolled back — `references/harvest-loop.md`, `references/delegation-invocation.md`.
 - Run the optional review/fix pipeline — independence is guaranteed by the always-final frontier review, so the intermediate review may even be grok reviewing itself with subagents — `references/review-pipeline.md`.
 - Land gate-passing changes as draft PRs and summarize in plain language — `references/result-handling.md`.
 
@@ -73,6 +73,6 @@ Detail lives in the references; the shape is:
 | `references/result-handling.md` | Draft PR + plain-language summary + run ledger | U7 |
 | `references/schedule-install.md` | Cross-platform schedule installer | U8 |
 
-Scripts: `detect-adapters.sh` (registry scan) · `detect-skills.sh` (catalog scan) · `onwatch-usage.sh` (balance oracle) · `wt.sh` (worktree create/cleanup/sweep) · `run-gate.sh` (deterministic gate) · `delegate-{grok,codex,claude}.sh` (per-adapter runners).
+Scripts: `detect-adapters.sh` (registry scan) · `detect-skills.sh` (catalog scan) · `check-auth.sh` (adapter headless-auth preflight) · `onwatch-usage.sh` (balance oracle) · `wt.sh` (worktree create/cleanup/sweep) · `run-gate.sh` (deterministic gate) · `apply-tool.sh` (deterministic tool chores) · `delegate-{grok,codex,claude}.sh` (per-adapter model runners).
 
 The full plan is at `docs/plans/2026-06-26-001-feat-token-eater-credit-harvester-plan.md`.

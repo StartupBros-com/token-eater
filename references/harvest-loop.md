@@ -1,16 +1,17 @@
 # Harvest loop
 
-The harvest loop is token-eater's end-to-end runbook. It detects current adapters, builds a gate-backed chore backlog, routes each chore to the cheapest adapter that is allowed to spend surplus, delegates in an isolated worktree, records the result, and repeats until no provider can safely run or the backlog is empty (F1).
+The harvest loop is token-eater's end-to-end runbook. It detects current adapters, builds a gate-backed chore backlog, runs deterministic tool chores directly, routes judgment chores to the cheapest adapter that is allowed to spend surplus, records the result, and repeats until no eligible work remains (F1).
 
 The posture engine is the control surface. Drain providers are meant to exhaust expiring surplus and run blind until refusal. Protect providers are primary capacity and run only when idle, never while the user is active, and never below a reserve floor when a balance oracle exists (R7-R11).
 
 ## Loop invariants
 
-- Do not delegate a chore unless `references/chore-discovery.md` admitted it with a deterministic gate (R5).
+- Do not execute a chore unless `references/chore-discovery.md` admitted it with a deterministic gate (R5).
 - Do not route to an adapter whose `strength_tier` is below the chore tier (R6).
 - Among eligible adapters, prefer the lowest `cost_rank` from `adapters.yaml` that has harvestable surplus (R6).
 - Do not run a protect provider outside the saved idle window or while there is evidence the user is actively using it (R9).
 - Do not check balance, reserve floors, or idle windows for a drain provider. Drain stops only on circuit-breaker exhaustion, provider parking, or an empty backlog (R8).
+- Do not route `exec: tool` chores to any provider. Deterministic tool chores run through `scripts/apply-tool.sh`; they do not check posture, balances, or credits.
 - Park a provider after the configured consecutive failure limit and continue with the others (R16).
 - Every gate-passing result goes through `references/result-handling.md`; nothing merges to the default branch (R14).
 
@@ -21,7 +22,7 @@ Load these before the first routing decision:
 1. **Merged config** from `references/setup-and-config.md`: configured providers, postures, idle window, reserve floors, `defaults.consecutive_failure_limit`, and `defaults.result_dir`.
 2. **Adapter registry** from `adapters.yaml`: `strength_tier`, `cost_rank`, `balance_signal`, `circuit_breaker`, `reset_cadence`, and invocation metadata.
 3. **Current detection output** from `scripts/detect-adapters.sh`: available vs. missing CLIs and their resolved paths.
-4. **Backlog** from `references/chore-discovery.md`: admitted chores with id, tier, gate, allowed files, disallowed paths, success criterion, and prompt constraints.
+4. **Backlog** from `references/chore-discovery.md`: admitted chores with id, tier, `exec`, gate, allowed files, disallowed paths, success criterion, prompt constraints for model chores, and `fixer_command` for tool chores.
 
 Config is intent; detection is capability. A provider must be enabled in config, present in `adapters.yaml`, and currently available from detection before it may receive work.
 
@@ -41,6 +42,7 @@ parked: false
 park_reason: null
 consecutive_failures: 0
 preflight: unknown
+auth_preflight: unknown
 last_outcome: null
 ```
 
@@ -92,16 +94,31 @@ The `balance_signal` field remains load-bearing even when it is `none` (R11). Do
 1. **Detect adapters.** Run `scripts/detect-adapters.sh` from the token-eater package root. If it exits `3`, stop with the R4 plain explanation and make no changes. Merge the available rows with config and `adapters.yaml`.
 2. **Initialize provider state.** Exclude configured providers that are missing from detection, disabled in config, absent from the registry, or whose posture violates the registry invariant that non-expiring providers must not be drain (R7). Record exclusions for the summary.
 3. **Build the eligible backlog.** Follow `references/chore-discovery.md`. The backlog must contain only gate-backed chores with explicit file scope. If the backlog is empty, end the run and summarize what was skipped and why.
-4. **Preflight candidate adapters lazily.** Before a provider's first real chore, run the one-time headless-contract preflight in `references/delegation-invocation.md`. If preflight fails, park that provider for the run and continue.
-5. **Pick the next chore.** Choose the first remaining backlog item in discovery order: mechanical before standard before high, then smaller/faster gates first.
-6. **Build the route set.** From unparked providers, keep only those whose `strength_tier` covers the chore tier and whose posture is harvestable now. Sort by `cost_rank` ascending. This implements the cheapest in-tier rule (R6).
-7. **Handle no route.** If no provider can run the current chore, mark that chore blocked for this run with the plain reason. Try the next backlog item. If no backlog item has a route, end the run.
-8. **Delegate to the selected provider.** Use `references/delegation-invocation.md` to create the worktree, assemble the prompt, launch the adapter headlessly, poll, classify the model result, and run the deterministic gate.
-9. **Apply stop and failure handling.** If output matches the provider's `circuit_breaker`, park it immediately. If the delegation or gate fails for another reason, increment `consecutive_failures`; park the provider when it reaches `defaults.consecutive_failure_limit` (default `3`). Reset `consecutive_failures` to `0` after a gate-passing chore.
-10. **Record and summarize the chore.** Hand the outcome to `references/result-handling.md`: create a draft PR or branch for gate-passing work, append the ledger entry, and keep a member-facing sentence for the run summary (R17, R20).
-11. **Repeat.** Remove completed chores from the backlog. Re-evaluate posture before every delegation, because idle windows can close and active-use state can change. Stop when the backlog is empty or every provider that could cover remaining chores is parked or not harvestable.
+4. **Pick the next chore.** Choose the first remaining backlog item in discovery order: mechanical before standard before high, then smaller/faster gates first.
+5. **Branch by execution mode before provider routing.** If the chore is `exec: tool`, do not build a route set and do not inspect provider posture, balance, reserve floors, idle windows, or credits. Create the worktree, write the allowed-files list, and run the deterministic fixer directly:
 
-## Routing details
+   ```bash
+   bash <skill-dir>/scripts/apply-tool.sh <worktree> "<fixer-command>" <allowed-files-file>
+   ```
+
+   `apply-tool.sh` returns the same JSON shape and exit-code family the loop already understands: `0` ok, `2` invoke-error, `4` scope-violation. After it returns, run the chore's deterministic gate and hand the normalized outcome to `references/result-handling.md` exactly like a model chore. Deterministic chores never spend credits; the credit-burn is for judgment chores.
+6. **For `exec: model`, build the route set.** From unparked providers, keep only those whose `strength_tier` covers the chore tier and whose posture is harvestable now. Sort by `cost_rank` ascending. This implements the cheapest in-tier rule (R6).
+7. **Handle no route.** If no provider can run the current model chore, mark that chore blocked for this run with the plain reason. Try the next backlog item. If no backlog item has a route, end the run.
+8. **Preflight the selected adapter lazily before its first model chore.** Run the auth preflight first:
+
+   ```bash
+   bash <skill-dir>/scripts/check-auth.sh <adapter>
+   ```
+
+   On exit `3` / `needs-reauth`, park the adapter for the run with the printed plain-language message. If this is the configured implementer and the grok-tapped posture says `pause-on-tapped`, pause the run. Do not invoke a CLI that could hang on interactive sign-in. On exit `2` / `unknown`, proceed but add the printed risk message to `issues[]`. On exit `0`, proceed. Only after this auth check may the loop run the one-time headless-contract preflight in `references/delegation-invocation.md`; if that preflight fails, park the provider for the run and continue.
+9. **Delegate to the selected provider.** Use `references/delegation-invocation.md` to create the worktree, assemble the prompt, launch the adapter headlessly, poll, classify the model result, and run the deterministic gate.
+10. **Apply stop and failure handling.** If model output matches the provider's `circuit_breaker`, park it immediately. If a model delegation or gate fails for another reason, increment `consecutive_failures`; park the provider when it reaches `defaults.consecutive_failure_limit` (default `3`). Reset `consecutive_failures` to `0` after a gate-passing model chore. Tool-chore failures do not count against any provider because no provider ran.
+11. **Record and summarize the chore.** Hand the outcome to `references/result-handling.md`: create a draft PR or branch for gate-passing work, append the ledger entry, and keep a member-facing sentence for the run summary (R17, R20).
+12. **Repeat.** Remove completed chores from the backlog. Re-evaluate posture before every model delegation, because idle windows can close and active-use state can change. Stop when the backlog is empty or every provider that could cover remaining model chores is parked or not harvestable.
+
+## Model routing details
+
+This section applies only to `exec: model` chores. `exec: tool` chores already ran through `scripts/apply-tool.sh` before provider routing.
 
 Use the tier order `mechanical < standard < high`. An adapter covers a chore when its tier is equal or higher.
 
@@ -148,16 +165,25 @@ State:
 
 Expected behavior: do not delegate anything. Park `claude` for this run with reason `active-or-not-idle`, leave the working tree untouched, and report: "No spare model capacity was available; Claude is protected while you are using it." This covers R9.
 
-### AE2: cheapest in-tier routing
+### AE2: deterministic formatter chore uses the tool path
 
 State:
 
-- Backlog contains a formatting chore tagged `mechanical`.
+- Backlog contains a formatting chore tagged `mechanical` with `exec: tool`.
 - Available providers include `grok` (`mechanical`, `cost_rank: 1`, `drain`) and `claude` (`high`, `cost_rank: 3`, `protect`).
 
-Expected behavior: route the chore to `grok`. Its tier covers mechanical work and it is the cheapest harvestable adapter. Do not use Claude merely because it is stronger. This covers R6.
+Expected behavior: run the formatter through `scripts/apply-tool.sh`, then run the gate and send the result to `references/result-handling.md`. Do not route the chore to Grok or Claude, and do not spend credits. This preserves R6 for model chores while keeping deterministic chores free.
 
-### AE3: grok drain runs blind
+### AE3: cheapest in-tier model routing
+
+State:
+
+- Backlog contains a dead-code cleanup chore tagged `mechanical` with `exec: model` because it needs judgment beyond a linter's safe autofix.
+- Available providers include `grok` (`mechanical`, `cost_rank: 1`, `drain`) and `claude` (`high`, `cost_rank: 3`, `protect`).
+
+Expected behavior: route the chore to `grok` after auth preflight and headless-contract preflight pass. Its tier covers mechanical model work and it is the cheapest harvestable adapter. Do not use Claude merely because it is stronger. This covers R6.
+
+### AE4: grok drain runs blind
 
 State:
 
@@ -165,9 +191,9 @@ State:
 - Backlog has multiple mechanical chores.
 - `grok` has `balance_signal: none`.
 
-Expected behavior: keep delegating mechanical chores to `grok`, with no balance check, reserve-floor check, or idle-window check, until either the backlog empties or output matches the `grok` `circuit_breaker` regex. This covers R7 and R8.
+Expected behavior: keep delegating eligible `exec: model` mechanical chores to `grok`, with no balance check, reserve-floor check, or idle-window check, until either the backlog empties or output matches the `grok` `circuit_breaker` regex. `exec: tool` mechanical chores still bypass Grok. This covers R7 and R8.
 
-### AE4: gate failure rolls back
+### AE5: gate failure rolls back
 
 State:
 
@@ -175,7 +201,7 @@ State:
 
 Expected behavior: `references/delegation-invocation.md` removes the worktree/temporary branch, opens no PR, leaves the user's working tree untouched, increments the provider failure count, and `references/result-handling.md` records the failed gate. This covers R13-R15.
 
-### AE5: oracle-backed protect provider, deferred
+### AE6: oracle-backed protect provider, deferred
 
 State:
 

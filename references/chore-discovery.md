@@ -58,7 +58,7 @@ Resolution order is per archetype:
 
 Do not hardcode skill names in this playbook. The catalog is the plug-in point: it declares which specific skill belongs to which archetype, and the detector resolves what exists on this machine. If the catalog changes later, discovery follows the catalog rather than this prose.
 
-**`cmd:`-detected archetypes are machine-level, not project-level.** `detect-skills.sh` reports `installed` for `formatter-idempotency` / `lint-autofix` when the *binary* exists on the machine (e.g. global `prettier` or `ruff`) — it does NOT mean THIS project uses that tool. Before admitting such a chore, confirm a project-local config or script (a `.prettierrc`/`eslint.config.*`/`ruff.toml`, or a `package.json` `format`/`lint` script). If none exists, the gate would be irrelevant to the project (eligibility rule 3) — exclude the chore and say so. `scripts/run-gate.sh`'s own detection already keys on project config, so trust the gate over the bare detector here.
+**`cmd:`-detected archetypes are machine-level, not project-level.** `detect-skills.sh` reports `installed` for `formatter-idempotency` / `lint-autofix` when the *binary* exists on the machine (e.g. global `prettier` or `ruff`) - it does NOT mean THIS project uses that tool. Before admitting such a chore, confirm a project-local config or script (a `.prettierrc`/`eslint.config.*`/`ruff.toml`, or a `package.json` `format`/`lint` script). If none exists, the gate would be irrelevant to the project (eligibility rule 3) - exclude the chore and say so. `scripts/run-gate.sh`'s own detection already keys on project config, so trust the gate over the bare detector here.
 
 The deterministic-gate rule still controls admission. A resolved skill only says _how_ to draft the chore; it does not make ungated work safe. After skill resolution, apply the same success criterion, gate relevance, explicit file scope, and tier checks as every other chore (R5, R6). If an installed skill wants to touch files outside the chore's allowed file list, narrow the prompt or skip the chore.
 
@@ -96,6 +96,27 @@ Tag every admitted chore with one tier:
 
 Routing uses the cheapest available adapter whose `strength_tier` covers the chore tier (R6). A high-tier provider may do mechanical work only when cheaper or lower-tier surplus is unavailable and the provider posture permits harvesting.
 
+## Execution mode
+
+Every admitted chore also carries an execution mode from `skills-catalog.yaml`:
+
+- `exec: tool` means a deterministic fixer does the work perfectly. Run the fixer directly through `scripts/apply-tool.sh`; do not route the chore to a model, do not check model posture, and do not spend credits. Formatter idempotency and lint autofix are the canonical tool chores.
+- `exec: model` means judgment is needed. Build the scope-fenced prompt as usual and let the harvest loop route it to an adapter whose tier, posture, and available surplus permit the run.
+
+If the catalog omits `exec`, default to `model`. The credit-burn belongs on judgment chores, not on work a tool already performs deterministically.
+
+`tool` chores must name a concrete fixer command as part of the backlog item. Examples: `pnpm format`, `pnpm lint -- --fix`, `pnpm exec prettier --write <files>`, `pnpm exec eslint --fix <files>`, `ruff check --fix <files>`, `ruff format <files>`, or `gofmt -w <files>`. The gate remains separate and authoritative; the fixer changes files, then the gate proves the result.
+
+`model` chores carry the scope-fenced prompt constraints described below.
+
+## Prefer the project's own scripts
+
+For formatter and lint debt, prefer the project's own script or target over an ad-hoc root-level tool invocation. Good discovery and fixer sources include `pnpm format`, `pnpm format:check`, `pnpm lint`, `pnpm lint -- --fix`, a Makefile `format` / `lint` target, or a per-package `turbo` command already used by the repository.
+
+This is not just style. Project scripts encode the repo's real globs, package boundaries, ignore files, and framework path conventions. A root-level ad-hoc command such as `pnpm exec prettier --check .` can misread framework paths like Next.js route groups `(group)` or dynamic routes `[param]`, or scan files the project intentionally excludes, producing false signals. Use the per-package or project-owned gate as both the discovery signal and the chore's gate whenever it exists.
+
+Ad-hoc tool commands are fallback only after checking for project-owned scripts/targets and local tool config. When falling back, keep the file list explicit and quote paths safely.
+
 ## Bundled safe-chore set
 
 Start with the safest mechanical chores. Add higher-tier chores only when their gate and file scope are clear.
@@ -130,9 +151,11 @@ Each admitted chore should be represented in prose or YAML with these fields bef
 - id: formatter-idempotency-001
   title: Make formatter check pass
   tier: mechanical
+  exec: tool
+  fixer_command: "pnpm format"
   gate:
     type: formatter
-    command: "scripts/run-gate.sh <worktree> 'pnpm exec prettier --check .'"
+    command: "scripts/run-gate.sh <worktree> 'pnpm format:check'"
   allowed_files:
     - src/example.ts
     - README.md
@@ -146,13 +169,13 @@ Each admitted chore should be represented in prose or YAML with these fields bef
     - "Do not create commits, push, install dependencies, or edit token-eater config."
 ```
 
-Use repo-relative paths. Keep `allowed_files` as small as practical; a chore with no explicit file list is not ready for delegation.
+Use repo-relative paths. Keep `allowed_files` as small as practical; a chore with no explicit file list is not ready for execution. For `exec: tool`, `fixer_command` is required and `prompt_constraints` may be omitted because no model prompt is built. For `exec: model`, omit `fixer_command` and keep the scope-fenced prompt constraints.
 
 ## Discovery procedure
 
-1. **Detect gates.** Run `scripts/run-gate.sh <repo>` once to see whether it can auto-detect a broad gate. Also inspect project markers cheaply: `package.json`, `Makefile`, `pyproject.toml`, `Cargo.toml`, `go.mod`, formatter/linter configs, and existing test directories.
-2. **Collect candidate files.** Use gate output, formatter/lint output, and local file patterns to identify a small candidate file set. Prefer files already implicated by a failing or checkable gate.
-3. **Create candidates.** Map each signal to one of the bundled chores or an installed skill route.
+1. **Detect gates.** Run `scripts/run-gate.sh <repo>` once to see whether it can auto-detect a broad gate. Also inspect project markers cheaply: `package.json`, `Makefile`, `pyproject.toml`, `Cargo.toml`, `go.mod`, formatter/linter configs, and existing test directories. For formatter/lint debt, look for the project's own scripts or package targets before trying an ad-hoc tool command.
+2. **Collect candidate files.** Use gate output, formatter/lint output, and local file patterns to identify a small candidate file set. Prefer files already implicated by a failing or checkable gate. If a project-owned script reports the debt, use that same script family for the chore's fixer/gate.
+3. **Create candidates.** Map each signal to one of the bundled chores or an installed skill route, and copy the catalog execution mode (`tool` or `model`) onto the backlog item. If the catalog has no `exec`, use `model`.
 4. **Apply the eligibility rule.** Drop any candidate without a deterministic gate, explicit allowed files, or clear success criterion (R5).
 5. **Tier admitted chores.** Use the tier table above. When uncertain between two tiers, choose the higher tier or exclude the chore.
 6. **Order the backlog.** Mechanical first, then standard, then high. Within a tier, prefer smaller file sets and faster gates.
@@ -163,7 +186,7 @@ Use repo-relative paths. Keep `allowed_files` as small as practical; a chore wit
 Use explicit gates when known:
 
 ```bash
-scripts/run-gate.sh "$WORKTREE" "pnpm exec prettier --check ."
+scripts/run-gate.sh "$WORKTREE" "pnpm format:check"
 scripts/run-gate.sh "$WORKTREE" "pnpm lint"
 scripts/run-gate.sh "$WORKTREE" "pnpm typecheck"
 scripts/run-gate.sh "$WORKTREE" "pnpm test -- --runInBand"
