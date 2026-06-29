@@ -120,21 +120,21 @@ PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
        git add -A && git commit -m "<concise message>"
 
 4. REVIEW your committed diff by running \`/ce-code-review\` and following its method. The review
-   MUST be a real FLEET of parallel reviewer subagents, not a single inline pass.
-   CRITICAL - your Task tool's available subagent types VARY from run to run. Do NOT assume a fixed
-   set; ADAPT to what THIS run exposes:
-     - PREFER the real review personas if present: \`compound-engineering:ce-correctness-reviewer\`,
-       \`ce-security-reviewer\`, \`ce-maintainability-reviewer\`, \`ce-testing-reviewer\` (and other
-       \`ce-*\` reviewers \`/ce-code-review\` calls for). When these are available, USE them - they are
-       the genuine review fleet.
-     - If a dispatch fails with "Unknown subagent type", the error message LISTS the available types.
-       Read that list and pick the closest reviewers from it. Try once to discover the set (e.g.
-       dispatch a probe) rather than guessing.
-     - UNIVERSAL FALLBACK: \`general-purpose\` is available in every run. If no \`ce-*\` reviewers exist
-       this run, dispatch one \`general-purpose\` subagent PER LENS (correctness, tests,
-       maintainability, security/safety), each given the relevant \`/ce-code-review\` lens instructions.
-   Never collapse to an inline review - always run an actual subagent fleet using whatever types this
-   run exposes. CONCURRENCY + RATE LIMITS: at most 2 subagents at once, never a big fan-out; on a
+   MUST be a real FLEET of parallel reviewer subagents, not a single inline pass. Run the fleet
+   over your committed diff (\`git diff origin/$BASE..HEAD\`).
+   Your Task tool's available subagent types vary by run, but the RELIABLE common set is grok's
+   native types (\`generalPurpose\`, \`code-reviewer\`). Build the fleet like this:
+     - PRIMARY (always available): dispatch one \`code-reviewer\` subagent over the whole diff, PLUS
+       one \`general-purpose\` subagent per lens - correctness, tests, maintainability,
+       security/safety - each given the relevant \`/ce-code-review\` lens instructions.
+     - OPPORTUNISTIC BONUS: if the richer \`compound-engineering:ce-*\` reviewer personas happen to be
+       available this run (ce-correctness-reviewer, ce-security-reviewer, ce-maintainability-reviewer,
+       ce-testing-reviewer), use them for the lenses instead - they are the genuine review personas.
+     - On any "Unknown subagent type" error, the message LISTS the valid types; pick the closest
+       reviewers from THAT list. Do NOT retry a type that just failed. \`general-purpose\` works in
+       every run - it is the guaranteed fallback.
+   Never collapse to an inline review - always run an actual subagent fleet. CONCURRENCY + RATE
+   LIMITS: at most 2 subagents at once, never a big fan-out; on a
    429/rate-limit, back off and RETRY the SAME dispatch (per the rate-limit rule) rather than dropping
    it - the intended fleet MUST complete. Collect every finding as must-fix (P0/P1) or nit (P2/P3).
 
