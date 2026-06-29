@@ -11,8 +11,10 @@
 #                  [--service grok] [--rounds 2] [--slug de-monolith] [--max-turns 150] \
 #                  [--pace gentle|thorough] [--dry-run]
 #
-# --pace gentle (default): dispatch subagents serially - safe for a lightly-used / low-tier grok
-#        account that 429s easily. --pace thorough: up to 3 in parallel, for accounts with headroom.
+# --pace thorough (default): dispatch subagents in parallel (up to 3) - the fan-out the review fleet
+#        needs. Real 429s are rare (most accounts have headroom; serial pacing was suppressing the
+#        fleet), and the backoff/resume net below covers a genuinely low-tier account. --pace gentle:
+#        serial dispatch for an account that actually 429-storms.
 # Rate-limit resilience is built in: if grok makes no progress under heavy 429s, the engine backs
 # off (exponential) and RESUMES via `grok --continue`, escalating to --no-subagents.
 #
@@ -24,7 +26,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SERVICE=grok; ROUNDS=2; SLUG=session; MAXTURNS=150; DRYRUN=0; PACE=gentle
+SERVICE=grok; ROUNDS=2; SLUG=session; MAXTURNS=150; DRYRUN=0; PACE=thorough
 REPO=""; SKILL=""; GATE=""; TARGET=""
 
 die() { echo "token-eater: $*" >&2; exit 2; }
@@ -123,11 +125,17 @@ CE_CATALOG=""
 if [ -n "$CE_AGENTS_DIR" ] && [ -f "$CE_AGENTS_DIR/ce-correctness-reviewer.md" ]; then
   REVIEW_INSTRUCTIONS="REVIEW your committed diff (\`git diff origin/$BASE..HEAD\`) by running the FULL
    /ce-code-review review with its REAL tiered persona roster and selection logic.
-   MECHANISM (critical): grok's \`ce-*\` subagent_type dispatch is NOT reliable, so do NOT dispatch
-   \`compound-engineering:ce-*\` Task types. Instead run EACH selected persona as a \`general-purpose\`
-   subagent (always available) prompted EXACTLY: \"Read the file ${CE_AGENTS_DIR}/<persona>.md and FULLY
-   ADOPT that reviewer persona. Then review this diff: <paste the full git diff origin/$BASE..HEAD>.
-   Report findings as P0/P1 (must-fix) or P2/P3 (nits) with file:line.\"
+   MECHANISM (critical - follow EXACTLY): grok's \`ce-*\` subagent_type dispatch is NOT reliable, so do
+   NOT dispatch \`compound-engineering:ce-*\` Task types - AND do NOT paraphrase or summarize a persona
+   from memory. Run EACH selected persona as a \`general-purpose\` subagent whose prompt's FIRST line is
+   literally: \"Use the Read tool to read ${CE_AGENTS_DIR}/<persona-agent-name>.md NOW and adopt that
+   reviewer persona verbatim - do not proceed until you have actually read the file.\" The SAME prompt
+   then adds: \"Now, as that persona, review this diff: <paste the full git diff origin/$BASE..HEAD>.
+   Report findings as P0/P1 (must-fix) or P2/P3 (nits) with file:line.\" Substitute <persona-agent-name>
+   with the real filename for each persona (e.g. ce-correctness-reviewer). HARD REQUIREMENT: every
+   review subagent MUST open its persona file with the Read tool - a review whose subagents did not Read
+   ${CE_AGENTS_DIR}/ce-*.md is INVALID and must be redone. The genuine persona file, not your paraphrase,
+   is what makes this a real /ce-code-review.
    SELECTION: follow the real catalog${CE_CATALOG:+ at $CE_CATALOG}.
      ALWAYS-ON - spawn all 4 every time: ce-correctness-reviewer, ce-testing-reviewer,
        ce-maintainability-reviewer, ce-project-standards-reviewer.
