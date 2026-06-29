@@ -49,13 +49,13 @@ Exit codes: `0` draft PR opened + gate verified green · `2` usage/preflight fai
 
 The rendered recipe (see `run-session.sh`) bakes in what the live runs taught us:
 - **No `--effort` flag for grok** — `grok-composer-2.5-fast` rejects `reasoningEffort` (400). The engine never passes it.
-- **Self-review uses only `general-purpose` subagents (or inline).** grok's Task registry is inconsistent across runs — specialized `ce-*` / `code-reviewer` subagent types are not reliably available, but `general-purpose` always is. So the recipe asks for a lens-based review (correctness / tests / maintainability / security) via `general-purpose` subagents, not a specific reviewer skill. This self-review is a **best-effort polish pass only**.
+- **The review stage runs the project's own `/ce-code-review` skill.** The recipe tells the service to review-and-fix its committed diff by invoking `/ce-code-review` (the real skill — it dispatches specialized reviewer subagents and applies safe, verified fixes, committing them on the branch, never pushing), looping until no P0/P1 remain or `--rounds` is hit. Because grok's Task registry is inconsistent across runs (specialized `ce-*` subagent types are not always registered), the recipe carries a **fallback**: if `/ce-code-review` is unavailable or its subagents fail to register, the service does an inline lens review (correctness / tests / maintainability / security) via `general-purpose` subagents, the only type reliably available. Either way this is the service reviewing **its own** work — a **best-effort polish pass**, not a substitute for your independent review.
 - **The gate is authoritative; the service's self-report is not.** `run-session.sh` re-runs the gate itself after the service finishes and refuses to open a PR if it's red.
 
 ## Report
 
 Relay what the engine returns:
-- **Success:** the draft PR URL + that the gate was independently verified green. Then: **"Run `/ce-code-review` and your frontier-model review on this PR before merging — token-eater did not merge anything."** The service's self-review is not a substitute for that.
+- **Success:** the draft PR URL + that the gate was independently verified green. Note that the service already ran `/ce-code-review` over its own diff as a self-review pass. Then: **"Run your OWN independent review before merging — a fresh `/ce-code-review` in your Claude session (a different model than the one that wrote the diff) plus your frontier-model pass — token-eater did not merge anything."** The service reviewing its own work is a polish pass, not a substitute for an independent review.
 - **Gate red (exit 4):** say plainly that the attempt didn't pass the project's own checks, so no PR was opened; the worktree is kept for inspection and your working tree was never touched.
 - **No gate / not applicable:** explain why nothing ran.
 

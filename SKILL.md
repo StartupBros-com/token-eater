@@ -59,9 +59,9 @@ A token-eater run is **one session**: one service, one skill, one polished draft
      --rounds 2 [--target "<optional scope hint>"]
    ```
 
-   Add `--dry-run` to render the recipe and stop. The service then runs the whole loop (skill -> gate -> self-review + fix, up to `--rounds` rounds -> push -> draft PR) on its own credits. This is the long-running part.
+   Add `--dry-run` to render the recipe and stop. The service then runs the whole loop (skill -> gate -> review + fix via `/ce-code-review`, up to `--rounds` rounds -> push -> draft PR) on its own credits. This is the long-running part.
 
-6. **Report.** Relay what `run-session.sh` returns: the draft PR URL and the independently-verified gate result, or a clean failure (gate red -> no PR, worktree kept for inspection). **Tell the user to run `/ce-code-review` and their frontier-model review on the PR before merging** — the service's self-review is only a best-effort polish; the real independent review is theirs. token-eater did not merge anything.
+6. **Report.** Relay what `run-session.sh` returns: the draft PR URL and the independently-verified gate result, or a clean failure (gate red -> no PR, worktree kept for inspection). The service already ran `/ce-code-review` over its own diff as a self-review pass. **Tell the user to run their own independent review before merging — a fresh `/ce-code-review` in their Claude session (a different model than wrote the diff) plus their frontier-model review** — the service reviewing its own work is only a best-effort polish; the real independent review is theirs. token-eater did not merge anything.
 
 ## Safety invariants
 

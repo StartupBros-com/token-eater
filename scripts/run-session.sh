@@ -118,14 +118,18 @@ PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
 3. Commit on the CURRENT branch (never \`$BASE\`):
        git add -A && git commit -m "<concise message>"
 
-4. SELF-REVIEW your committed diff (\`git diff origin/$BASE..HEAD\`) across these lenses:
-   correctness, tests, maintainability, and security/safety. If parallel subagents are available
-   you MAY dispatch one \`general-purpose\` subagent per lens (use ONLY \`general-purpose\` - do not
-   rely on any other subagent type; they are not reliably registered here). Otherwise review
-   inline. Collect findings as must-fix (P0/P1) and nits (P2/P3).
+4. REVIEW your committed diff using the project's OWN review skill: run \`/ce-code-review\`.
+   This is the real review stage - it dispatches specialized reviewer subagents and applies
+   safe, verified fixes, committing them on THIS branch (it never pushes). Use it; do not
+   hand-roll a review when this skill is available.
+   FALLBACK - only if \`/ce-code-review\` is not installed here, errors out, or its reviewer
+   subagents fail to register: do an inline lens review across correctness, tests,
+   maintainability, and security/safety - optionally via \`general-purpose\` subagents (the only
+   subagent type reliably registered here) - and apply the must-fix (P0/P1) findings yourself.
 
-5. Fix every P0/P1 finding, re-run the gate (it must stay green), and commit the fix. Then
-   re-review. Repeat steps 4-5 until there are no P0/P1 findings, OR you have done $ROUNDS rounds.
+5. Re-run the gate (\`$GATE\`) - it MUST stay green after any review fixes; commit any fix the
+   review skill did not already commit. If P0/P1 issues remain, fix, re-gate, and review again.
+   Repeat steps 4-5 until no P0/P1 findings remain, OR you have done $ROUNDS review rounds.
 
 6. Push the branch and open a DRAFT pull request against \`$BASE\` on $ORIGIN_SLUG:
        git push -u origin $BRANCH
