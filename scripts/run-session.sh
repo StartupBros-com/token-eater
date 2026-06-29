@@ -48,10 +48,11 @@ ensure_deps() {
     if   [ -f uv.lock ]     && has_cmd uv;     then uv sync >/dev/null 2>&1 || true
     elif [ -f poetry.lock ] && has_cmd poetry; then poetry install >/dev/null 2>&1 || true
     fi
-    { [ -f Cargo.toml ]    && has_cmd cargo;  } && { cargo fetch >/dev/null 2>&1 || true; }
-    { [ -f go.mod ]        && has_cmd go;     } && { go mod download >/dev/null 2>&1 || true; }
-    { [ -f Gemfile.lock ]  && has_cmd bundle; } && { bundle install >/dev/null 2>&1 || true; }
-  )
+    if [ -f Cargo.toml ]   && has_cmd cargo;  then cargo fetch >/dev/null 2>&1 || true; fi
+    if [ -f go.mod ]       && has_cmd go;     then go mod download >/dev/null 2>&1 || true; fi
+    if [ -f Gemfile.lock ] && has_cmd bundle; then bundle install >/dev/null 2>&1 || true; fi
+    :
+  ) || true
   return 0
 }
 while [ "$#" -gt 0 ]; do
@@ -152,10 +153,11 @@ else
     fi
   done
   if [ -z "$GATE_TIER" ]; then
-    # No green deterministic gate. (Step 2 converts this into a Tier-C soft AI-review run.)
-    echo "  baseline: no green deterministic gate found - refusing for now (soft tier lands next)."
-    bash "$HERE/wt.sh" cleanup "$REPO" "$WORKTREE" drop >/dev/null 2>&1 || true
-    exit 3
+    # No green deterministic gate -> Tier C (operator decision 2026-06-29): run anyway, with the AI
+    # review + draft PR as the safety net and a prominent "no tests" banner on the PR. This keeps
+    # token-eater usable on the many projects (common for less-technical users) that have no checks.
+    GATE=""; GATE_TIER=soft
+    echo "  baseline: no deterministic gate -> SOFT tier (AI-review-only; the PR will be clearly flagged)."
   fi
 fi
 
@@ -211,7 +213,20 @@ else
    the diff. Dispatch them $CONC_SHORT; on a 429 back off and retry. Collect P0/P1 and nits."
 fi
 
-# 4. RENDER THE RECIPE - the self-contained instruction grok runs autonomously
+# 4. RENDER THE RECIPE - the self-contained instruction grok runs autonomously.
+#    Gate wording adapts to the tier: A/B have a real gate to run; C (soft) has none, so the review
+#    is the only net and the change must be conservative + the PR clearly flagged.
+if [ "$GATE_TIER" = soft ]; then
+  GATE_DESC="(none) - this project has NO automated tests/typecheck/lint, so there is NO deterministic gate. Your REVIEW (step 4) is the ONLY safety net: make the smallest correct, behavior-preserving change possible, and if you are not certain a change is safe, do NOT make it."
+  GATE_STEP="There is NO gate to run in this project. Make the smallest behavior-preserving change and rely on the step-4 review to catch problems. Be conservative - no aggressive refactors."
+  REGATE_STEP="(No gate to re-run.) Re-review (step 4) until no P0/P1 findings remain, OR you have done $ROUNDS review rounds."
+  PR_GATE_NOTE="WARNING: this project has NO automated tests - this change was verified by AI review ONLY. Please review it carefully before merging."
+else
+  GATE_DESC="\`$GATE\` (authoritative - it must pass at every commit)"
+  GATE_STEP="Run the gate (\`$GATE\`). It MUST pass. If it fails, fix until green. If you genuinely cannot, run \`git reset --hard\` to restore a clean state and STOP with a clear explanation - never open a PR for broken work."
+  REGATE_STEP="Re-run the gate (\`$GATE\`) - it MUST stay green after any review fixes; commit any fix the review did not already commit. If P0/P1 issues remain, fix, re-gate, and review again. Repeat steps 4-5 until no P0/P1 remain, OR you have done $ROUNDS review rounds."
+  PR_GATE_NOTE="the gate \`$GATE\` passes"
+fi
 RECIPE="$LOG/recipe.txt"
 cat > "$RECIPE" <<EOF
 You are token-eater's autonomous worker for ONE session. You are inside a fresh git worktree of
@@ -220,10 +235,9 @@ the $ORIGIN_SLUG repository, on branch \`$BRANCH\` (based on origin/$BASE). Do A
 GOAL: $GOAL_LINE
 Use the \`/$SKILL\` skill as your method.
 
-THE GATE (authoritative - it must pass at every commit):
-    $GATE
-node_modules / dependencies are already installed (symlinked). Run the gate yourself; do not
-trust your own judgment over the gate.
+THE GATE: $GATE_DESC
+Your project's dependencies have already been installed in this worktree. When there is a gate, run
+it yourself and trust it over your own judgment.
 
 PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
 
@@ -235,22 +249,18 @@ PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
    target IS part of the job. Do NOT fixate on one pre-chosen file. $HINT. Preserve all behavior, the public API
    surface, types, tests, validation, error handling, and security/auth. Never weaken or delete a test.
 
-2. Run the gate (\`$GATE\`). It MUST pass. If it fails, fix until green. If you genuinely cannot,
-   run \`git reset --hard\` to restore a clean state and STOP with a clear explanation - never open
-   a PR for broken work.
+2. $GATE_STEP
 
 3. Commit on the CURRENT branch (never \`$BASE\`):
        git add -A && git commit -m "<concise message>"
 
 4. $REVIEW_INSTRUCTIONS
 
-5. Re-run the gate (\`$GATE\`) - it MUST stay green after any review fixes; commit any fix the
-   review skill did not already commit. If P0/P1 issues remain, fix, re-gate, and review again.
-   Repeat steps 4-5 until no P0/P1 findings remain, OR you have done $ROUNDS review rounds.
+5. $REGATE_STEP
 
 6. Push the branch and open a DRAFT pull request against \`$BASE\` on $ORIGIN_SLUG:
        git push -u origin $BRANCH
-       gh pr create --repo $ORIGIN_SLUG --base $BASE --draft --title "<title>" --body "<plain summary; note the gate passes>"
+       gh pr create --repo $ORIGIN_SLUG --base $BASE --draft --title "<title>" --body "<plain summary; $PR_GATE_NOTE>"
    The PR MUST be a draft. NEVER merge it, NEVER mark it ready, NEVER push to \`$BASE\`.
 
 FINAL OUTPUT: a summary - files changed, final gate result, how many review rounds, any nits left
@@ -311,9 +321,12 @@ fi
 echo "  $SERVICE finished (invoke_ok=$INVOKE_OK); logs in $LOG/"
 
 # 6. INDEPENDENT VERIFICATION - never trust the service's self-report; re-run the gate ourselves.
+#    Soft tier has no deterministic gate to re-run; the AI review + draft PR + banner are the net.
 echo "-- independent gate verification --"
-if bash "$HERE/run-gate.sh" "$WORKTREE" "$GATE" > "$LOG/verify.log" 2>&1; then
-  GATEOK=1; echo "  gate: GREEN"
+if [ "$GATE_TIER" = soft ]; then
+  GATEOK=1; echo "  gate: NONE (soft tier - AI-review-only; PR will be flagged)"
+elif bash "$HERE/run-gate.sh" "$WORKTREE" "$GATE" > "$LOG/verify.log" 2>&1; then
+  GATEOK=1; echo "  gate: GREEN ($GATE)"
 else
   GATEOK=0; echo "  gate: RED (see $LOG/verify.log)"; tail -6 "$LOG/verify.log"
 fi
@@ -331,22 +344,37 @@ if [ "${COMMITS:-0}" -lt 1 ]; then
 fi
 
 # 7. ENSURE A DRAFT PR EXISTS (the service usually opens it; if not, we do - draft, on origin).
+if [ "$GATE_TIER" = soft ]; then GATE_SUMMARY="no automated gate (AI-review-only)"; else GATE_SUMMARY="gate \`$GATE\` passes"; fi
 PR_URL="$(gh pr list --repo "$ORIGIN_SLUG" --head "$BRANCH" --json url --jq '.[0].url' 2>/dev/null || true)"
 if [ -z "$PR_URL" ]; then
   echo "-- service did not open a PR; opening a draft PR ourselves --"
   git -C "$WORKTREE" push -u origin "$BRANCH" >/dev/null 2>&1 || true
   PR_URL="$(gh pr create --repo "$ORIGIN_SLUG" --base "$BASE" --head "$BRANCH" --draft \
               --title "chore(token-eater): $SLUG" \
-              --body "Automated $SKILL pass by token-eater via $SERVICE. Gate \`$GATE\` passes. Draft - review before merging; token-eater did not merge." \
+              --body "Automated $SKILL pass by token-eater via $SERVICE ($GATE_SUMMARY). Draft - review before merging; token-eater did not merge." \
               2>>"$LOG/pr.log" || true)"
 fi
-[ -z "$PR_URL" ] && { echo "token-eater: gate green but could not open a PR (see $LOG/pr.log). Branch kept: $BRANCH"; exit 5; }
+[ -z "$PR_URL" ] && { echo "token-eater: changes ready but could not open a PR (see $LOG/pr.log). Branch kept: $BRANCH"; exit 5; }
+
+# Soft tier: prepend a prominent "no automated tests" banner to the PR body (whoever opened it), so a
+# less-technical reviewer cannot miss that this change was AI-reviewed only.
+if [ "$GATE_TIER" = soft ]; then
+  _body="$(gh pr view "$PR_URL" --repo "$ORIGIN_SLUG" --json body --jq '.body' 2>/dev/null || true)"
+  gh pr edit "$PR_URL" --repo "$ORIGIN_SLUG" --body "> [!WARNING]
+> **This project has no automated tests/typecheck.** token-eater could not machine-verify this change; it was checked by AI code review only. **Please read the diff before merging.**
+
+$_body" >/dev/null 2>&1 || true
+fi
 
 # verify it is actually a draft
 IS_DRAFT="$(gh pr view "$PR_URL" --repo "$ORIGIN_SLUG" --json isDraft --jq '.isDraft' 2>/dev/null || echo unknown)"
 echo
 echo "== DONE =="
 echo "  draft PR: $PR_URL  (isDraft=$IS_DRAFT)"
-echo "  gate:     GREEN ($COMMITS commit/s)"
+if [ "$GATE_TIER" = soft ]; then
+  echo "  gate:     NONE - soft tier ($COMMITS commit/s); PR flagged 'AI-reviewed only - review before merging'"
+else
+  echo "  gate:     GREEN ($COMMITS commit/s, $GATE_TIER: $GATE)"
+fi
 echo "  review:   run /ce-code-review + your frontier-model review on the PR before merging."
 echo "  worktree: $WORKTREE (remove with: bash $HERE/wt.sh cleanup $REPO $WORKTREE keep)"
