@@ -26,16 +26,19 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SERVICE=grok; ROUNDS=2; SLUG=session; MAXTURNS=150; DRYRUN=0; PACE=thorough
+SERVICE=grok; ROUNDS=2; SLUG=session; MAXTURNS=150; DRYRUN=0; PACE=thorough; INSTALL_DEPS=0
 REPO=""; SKILL=""; GATE=""; TARGET=""
 
 die() { echo "token-eater: $*" >&2; exit 2; }
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
-# Install the project's deps INTO the worktree before the gate. A fresh git worktree has the source
-# but not the per-package node_modules a pnpm/yarn WORKSPACE needs (e.g. better-sqlite3 under
-# apps/cockpit), and non-Node stacks need their own fetch. Best-effort + offline-friendly: never fail
-# the run here - if install can't complete, the gate ladder simply falls to a check that does work.
+# Install the project's deps INTO the worktree before the gate (OPT-IN via --install-deps). A fresh git
+# worktree has the source but not the per-package node_modules a pnpm/yarn WORKSPACE needs (e.g.
+# better-sqlite3 under apps/cockpit), and non-Node stacks need their own fetch. SECURITY: package
+# managers run the repo's (and its deps') lifecycle scripts (preinstall/postinstall/prepare) - i.e.
+# arbitrary code from the target repo on THIS machine. So it is OFF by default and only runs when the
+# user opts in for a repo they trust. Best-effort + offline-friendly: never fail the run here - if
+# install can't complete, the gate ladder simply falls to a check that does work.
 ensure_deps() {
   local wt="$1"
   ( cd "$wt" 2>/dev/null || exit 0
@@ -66,6 +69,7 @@ while [ "$#" -gt 0 ]; do
     --slug) SLUG="$2"; shift 2;;
     --max-turns) MAXTURNS="$2"; shift 2;;
     --pace) PACE="$2"; shift 2;;
+    --install-deps) INSTALL_DEPS=1; shift;;
     --dry-run) DRYRUN=1; shift;;
     *) die "unknown arg: $1";;
   esac
@@ -82,10 +86,9 @@ else
   HINT="No target was pre-chosen — the skill must identify the target itself via its own analysis/census"
 fi
 
-# Pace controls subagent CONCURRENCY - the dominant 429 driver. A lightly-used grok account has a low
-# rate-limit tier (it scales with historical spend), so a parallel subagent fan-out 429-storms it and
-# the backoff sleeps dominate wall-clock. Default 'gentle' paces UNDER the limit (serial dispatch),
-# which both protects a first-time/low-tier account and avoids the wasted 429+backoff cycles.
+# Pace controls subagent CONCURRENCY. Default 'thorough' (up to 3 in parallel) - the fan-out the review
+# fleet needs; real 429s are rare and the backoff/resume net below covers a genuinely low-tier account.
+# '--pace gentle' dispatches serially for an account that actually 429-storms.
 if [ "$PACE" = thorough ]; then
   CONC_SHORT="up to 3 in parallel"
   CONCURRENCY="You MAY run up to 3 subagents (Task tool) in parallel - this account has rate-limit headroom (thorough pace)."
@@ -107,12 +110,15 @@ echo "  repo:    $ORIGIN_SLUG"
 echo "  service: $SERVICE   skill: $SKILL   rounds: $ROUNDS"
 echo "  target:  ${TARGET:-<skill discovers its own target on $SERVICE>}"
 echo "  gate:    ${GATE:-<auto-detect strongest green check>}"
+echo "  note:    runs this repo's gate (and, with --install-deps, its install scripts) on this machine - use trusted repos only"
 
 # 1. AUTH PREFLIGHT - never let an expired token hang the run
 echo "-- auth preflight --"
-if ! bash "$HERE/check-auth.sh" "$SERVICE"; then
-  rc=$?; [ "$rc" = 3 ] && { echo "token-eater: $SERVICE needs re-auth; stopping."; exit 2; }
-fi
+# Capture check-auth's real exit code: `rc=$?` inside `if ! cmd` would always be 0 (the negation's
+# status), so a needs-reauth (exit 3) would never stop the run and the service would hang on an
+# interactive login prompt unattended.
+_authrc=0; bash "$HERE/check-auth.sh" "$SERVICE" || _authrc=$?
+[ "$_authrc" = 3 ] && { echo "token-eater: $SERVICE needs re-auth; stopping."; exit 2; }
 
 # 2. FRESH BASE - branch the worktree off origin/main, not stale local state
 echo "-- fetch origin + isolated worktree off origin/main --"
@@ -124,9 +130,14 @@ BRANCH="$(git -C "$WORKTREE" rev-parse --abbrev-ref HEAD)"
 echo "  worktree: $WORKTREE"
 echo "  branch:   $BRANCH (off origin/$BASE)"
 
-# 2b. ENSURE DEPS - install the project's dependencies into the worktree so the gate can run
-echo "-- ensuring project deps in the worktree (best-effort) --"
-ensure_deps "$WORKTREE"
+# 2b. ENSURE DEPS - OPT-IN. Installing runs the repo's lifecycle scripts (arbitrary code from the
+#     target repo on this machine), so it is off unless --install-deps is passed for a trusted repo.
+if [ "$INSTALL_DEPS" = 1 ]; then
+  echo "-- installing project deps in the worktree (--install-deps: runs the repo's install scripts - trusted repos only) --"
+  ensure_deps "$WORKTREE"
+else
+  echo "-- skipping dependency install (default; pass --install-deps for repos you trust if the gate needs deps) --"
+fi
 
 # 3. BASELINE GATE - the STRONGEST deterministic check that is GREEN before we start (a red gate can't
 #    prove anything). Explicit --gate is honored as-is. Otherwise climb the ladder: try the detected
@@ -143,13 +154,16 @@ if [ -n "$GATE" ]; then
     exit 3
   fi
 else
+  # run-gate.sh --list emits "<ecosystem>\t<command>" lines, strongest-first. Stay within the strongest
+  # ecosystem (don't verify a JS change with an unrelated Python suite), trying candidates until one is green.
   _CANDS=(); while IFS= read -r _line; do [ -n "$_line" ] && _CANDS+=("$_line"); done < <(bash "$HERE/run-gate.sh" --list "$WORKTREE" 2>/dev/null || true)
-  _eco=""; [ "${#_CANDS[@]}" -gt 0 ] && _eco="$(printf '%s' "${_CANDS[0]}" | awk '{print $1}')"
-  for cand in "${_CANDS[@]}"; do
-    [ "$(printf '%s' "$cand" | awk '{print $1}')" = "$_eco" ] || continue   # stay in the strongest ecosystem
-    echo "  trying: $cand"
-    if bash "$HERE/run-gate.sh" "$WORKTREE" "$cand" > "$LOG/baseline.log" 2>&1; then
-      GATE="$cand"; GATE_TIER=detected; echo "  baseline: GREEN ($GATE)"; break
+  _eco=""; [ "${#_CANDS[@]}" -gt 0 ] && _eco="${_CANDS[0]%%$'\t'*}"
+  for _entry in "${_CANDS[@]}"; do
+    _ce="${_entry%%$'\t'*}"; _cmd="${_entry#*$'\t'}"
+    [ "$_ce" = "$_eco" ] || continue   # stay in the strongest ecosystem
+    echo "  trying: $_cmd"
+    if bash "$HERE/run-gate.sh" "$WORKTREE" "$_cmd" > "$LOG/baseline.log" 2>&1; then
+      GATE="$_cmd"; GATE_TIER=detected; echo "  baseline: GREEN ($GATE)"; break
     fi
   done
   if [ -z "$GATE_TIER" ]; then
@@ -229,7 +243,7 @@ if [ "$GATE_TIER" = soft ]; then
   GATE_DESC="(none) - this project has NO automated tests/typecheck/lint, so there is NO deterministic gate. Your REVIEW (step 4) is the ONLY safety net: make the smallest correct, behavior-preserving change possible, and if you are not certain a change is safe, do NOT make it."
   GATE_STEP="There is NO gate to run in this project. Make the smallest behavior-preserving change and rely on the step-4 review to catch problems. Be conservative - no aggressive refactors."
   REGATE_STEP="(No gate to re-run.) Re-review (step 4) until no P0/P1 findings remain, OR you have done $ROUNDS review rounds."
-  PR_GATE_NOTE="WARNING: this project has NO automated tests - this change was verified by AI review ONLY. Please review it carefully before merging."
+  PR_GATE_NOTE="WARNING: this project has NO automated tests, so this change could NOT be machine-verified. Please review it carefully before merging."
 else
   GATE_DESC="\`$GATE\` (authoritative - it must pass at every commit)"
   GATE_STEP="Run the gate (\`$GATE\`). It MUST pass. If it fails, fix until green. If you genuinely cannot, run \`git reset --hard\` to restore a clean state and STOP with a clear explanation - never open a PR for broken work."
@@ -370,7 +384,7 @@ fi
 if [ "$GATE_TIER" = soft ]; then
   _body="$(gh pr view "$PR_URL" --repo "$ORIGIN_SLUG" --json body --jq '.body' 2>/dev/null || true)"
   gh pr edit "$PR_URL" --repo "$ORIGIN_SLUG" --body "> [!WARNING]
-> **This project has no automated tests/typecheck.** token-eater could not machine-verify this change; it was checked by AI code review only. **Please read the diff before merging.**
+> **This project has no automated tests/typecheck, so token-eater could not machine-verify this change.** An AI review was requested, but nothing here proves it ran or was thorough. **Please read the diff carefully before merging.**
 
 $_body" >/dev/null 2>&1 || true
 fi

@@ -16,12 +16,13 @@ export TOKEN_EATER_DELEGATED=1   # marker so a worker that re-invokes token-eate
 
 WT="${1:?worktree dir required}"
 PROMPT="${2:?prompt file required}"
-SCHEMA="${3:?schema file required (codex needs --output-schema)}"
+SCHEMA="${3:-}"          # OPTIONAL: the self-contained-recipe model passes no schema (codex runs the recipe
+                        # agentically and opens its own draft PR). When given, structured output is enforced.
 ALLOWED="${4:-}"
 
 [ -d "$WT" ]     || { echo '{"adapter":"codex","ok":false,"error":"worktree not found"}'; exit 2; }
 [ -f "$PROMPT" ] || { echo '{"adapter":"codex","ok":false,"error":"prompt file not found"}'; exit 2; }
-[ -f "$SCHEMA" ] || { echo '{"adapter":"codex","ok":false,"error":"schema file not found"}'; exit 2; }
+[ -z "$SCHEMA" ] || [ -f "$SCHEMA" ] || { echo '{"adapter":"codex","ok":false,"error":"schema file not found"}'; exit 2; }
 command -v codex >/dev/null || { echo '{"adapter":"codex","ok":false,"error":"codex not installed"}'; exit 2; }
 
 WT="$(cd "$WT" && pwd)"
@@ -29,9 +30,10 @@ RUNDIR="$(mktemp -d -t te-codex-XXXXXX)"
 RESULT="$RUNDIR/result.json"; STDOUT="$RUNDIR/stdout.log"; ERRLOG="$RUNDIR/stderr.log"
 CB_REGEX='(usage limit reached|rate.?limit|429 too many requests|All accounts are temporarily unavailable)'
 
-# --- run the verified codex contract, cwd = worktree ---
+# --- run the codex contract, cwd = worktree (output-schema only if supplied) ---
+SCHEMA_ARGS=(); [ -n "$SCHEMA" ] && SCHEMA_ARGS=(--output-schema "$SCHEMA")
 set +e
-( cd "$WT" && codex exec -s workspace-write --output-schema "$SCHEMA" -o "$RESULT" - < "$PROMPT" ) >"$STDOUT" 2>"$ERRLOG"
+( cd "$WT" && codex exec -s workspace-write "${SCHEMA_ARGS[@]}" -o "$RESULT" - < "$PROMPT" ) >"$STDOUT" 2>"$ERRLOG"
 CODEX_EXIT=$?
 set -e
 

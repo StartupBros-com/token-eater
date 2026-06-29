@@ -65,7 +65,8 @@ A token-eater run is **one session**: one service, one skill, one polished draft
 ## Safety invariants
 
 - Never auto-merge AND never auto-mark-ready — work lands as a **draft PR**; the final review and merge are always yours.
-- Only run a skill whose result the project's own deterministic gate can verify. No gate -> no run.
+- **Prefer a deterministic gate; degrade transparently when there isn't one.** Tier A/B run the project's real check and the result is re-verified independently. Tier C (no gate) still runs but is clearly flagged on the PR as AI-reviewed-only — never presented as machine-verified.
+- **Trust boundary:** token-eater runs *the target repo's own code* on your machine — its gate command (e.g. `pnpm test`), and, with `--install-deps`, its dependency install/lifecycle scripts. Point it only at repos you trust. Dependency install is OFF by default for this reason.
 - token-eater's gate is re-run **independently** after the service finishes — the service's self-report is never trusted for keep/ship.
 - token-eater only spends the service you named (or your saved default).
 - All work happens in a fresh worktree branched from `origin/main`; your checkout and uncommitted work are never touched. A red final gate means no PR.
