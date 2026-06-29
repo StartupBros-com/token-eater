@@ -174,7 +174,16 @@ CE_AGENTS_DIR="$(ls -d "$HOME"/.claude/plugins/marketplaces/*/plugins/compound-e
 CE_CATALOG=""
 [ -n "$CE_SKILL_DIR" ] && [ -f "$CE_SKILL_DIR/references/persona-catalog.md" ] && CE_CATALOG="$CE_SKILL_DIR/references/persona-catalog.md"
 
-if [ -n "$CE_AGENTS_DIR" ] && [ -f "$CE_AGENTS_DIR/ce-correctness-reviewer.md" ]; then
+if [ "$SERVICE" = claude ]; then
+  # claude runs the REAL /ce-code-review: its ce-* reviewer subagents are NATIVE and reliable here, so
+  # no persona-file workaround is needed - just invoke the skill and apply its fixes.
+  REVIEW_INSTRUCTIONS="REVIEW your committed diff by running \`/ce-code-review\`. Its compound-engineering
+   \`ce-*\` reviewer subagents are native in this runtime - let the skill spawn its real tiered persona
+   fleet (always-on correctness/testing/maintainability/project-standards + the diff-relevant
+   conditional reviewers), report findings, and APPLY its safe, verified fixes (committing them; it
+   never pushes). Loop until no P0/P1 findings remain, OR you have done $ROUNDS review rounds. Then
+   ensure the gate is still green (if there is one)."
+elif [ -n "$CE_AGENTS_DIR" ] && [ -f "$CE_AGENTS_DIR/ce-correctness-reviewer.md" ]; then
   # Build an EXPLICIT, numbered per-persona dispatch list. grok follows literal dispatch commands but
   # PARAPHRASES the personas (and skips the file Read) when told abstractly to "select from the catalog
   # and dispatch each" - proven across runs #817/#818/#819 (0 persona-file reads). Core set = 4 always-on
@@ -190,7 +199,7 @@ if [ -n "$CE_AGENTS_DIR" ] && [ -f "$CE_AGENTS_DIR/ce-correctness-reviewer.md" ]
      ${n}. general-purpose subagent, prompt VERBATIM: \"Use the Read tool to read $CE_AGENTS_DIR/$p.md and adopt that reviewer persona exactly (do not proceed until you have actually read the file). Then, as that persona, review the diff from: git diff origin/$BASE..HEAD . Report findings as P0/P1 (must-fix) or P2/P3 (nits) with file:line. The FIRST line of your reply MUST be exactly: 'PERSONA-MARK: $p :: ' followed by a verbatim sentence of 10+ words copied from $p.md - this proves you actually read the file.\""
   done
   REVIEW_INSTRUCTIONS="REVIEW your committed diff (from: git diff origin/$BASE..HEAD) by running /ce-code-review's
-   genuine reviewer personas as a real subagent FLEET. grok's \`ce-*\` subagent_type dispatch is unreliable, so
+   genuine reviewer personas as a real subagent FLEET. This runtime's \`ce-*\` subagent_type dispatch is unreliable, so
    each persona runs as a \`general-purpose\` subagent that READS its persona file. Do NOT paraphrase a persona
    from memory and do NOT skip the Read - the genuine persona file is what makes this a real /ce-code-review.
    DISPATCH EXACTLY THESE SUBAGENTS, using each prompt verbatim (do not summarize, do not substitute):$PERSONA_DISPATCHES
