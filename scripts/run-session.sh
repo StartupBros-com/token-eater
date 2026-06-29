@@ -123,37 +123,33 @@ CE_CATALOG=""
 [ -n "$CE_SKILL_DIR" ] && [ -f "$CE_SKILL_DIR/references/persona-catalog.md" ] && CE_CATALOG="$CE_SKILL_DIR/references/persona-catalog.md"
 
 if [ -n "$CE_AGENTS_DIR" ] && [ -f "$CE_AGENTS_DIR/ce-correctness-reviewer.md" ]; then
-  REVIEW_INSTRUCTIONS="REVIEW your committed diff (\`git diff origin/$BASE..HEAD\`) by running the FULL
-   /ce-code-review review with its REAL tiered persona roster and selection logic.
-   MECHANISM (critical - follow EXACTLY): grok's \`ce-*\` subagent_type dispatch is NOT reliable, so do
-   NOT dispatch \`compound-engineering:ce-*\` Task types - AND do NOT paraphrase or summarize a persona
-   from memory. Run EACH selected persona as a \`general-purpose\` subagent whose prompt's FIRST line is
-   literally: \"Use the Read tool to read ${CE_AGENTS_DIR}/<persona-agent-name>.md NOW and adopt that
-   reviewer persona verbatim - do not proceed until you have actually read the file.\" The SAME prompt
-   then adds: \"Now, as that persona, review this diff: <paste the full git diff origin/$BASE..HEAD>.
-   Report findings as P0/P1 (must-fix) or P2/P3 (nits) with file:line.\" Substitute <persona-agent-name>
-   with the real filename for each persona (e.g. ce-correctness-reviewer). HARD REQUIREMENT: every
-   review subagent MUST open its persona file with the Read tool - a review whose subagents did not Read
-   ${CE_AGENTS_DIR}/ce-*.md is INVALID and must be redone. The genuine persona file, not your paraphrase,
-   is what makes this a real /ce-code-review.
-   SELECTION: follow the real catalog${CE_CATALOG:+ at $CE_CATALOG}.
-     ALWAYS-ON - spawn all 4 every time: ce-correctness-reviewer, ce-testing-reviewer,
-       ce-maintainability-reviewer, ce-project-standards-reviewer.
-     CROSS-CUTTING CONDITIONAL - read the diff and spawn each whose domain it genuinely touches (judgment,
-       not keyword match): ce-security-reviewer (auth/endpoints/input/secrets), ce-performance-reviewer
-       (DB queries/loops/caching/async), ce-api-contract-reviewer (routes/serializers/exported types/
-       versioning), ce-data-migration-reviewer (migration or schema artifacts ONLY), ce-reliability-reviewer
-       (error handling/retries/timeouts/background jobs), ce-adversarial-reviewer (>=50 changed non-test/
-       non-generated lines OR auth/payments/data-mutation/external-API), ce-previous-comments-reviewer
-       (ONLY when reviewing a PR that already has prior review comments).
-     STACK-SPECIFIC CONDITIONAL - spawn only if the diff has real work for them: ce-julik-frontend-races-reviewer
-       (Stimulus/Turbo/DOM/timers/async UI), ce-swift-ios-reviewer (Swift/SwiftUI/UIKit/iOS project files).
-     All persona files live in ${CE_AGENTS_DIR}/. ANNOUNCE the selected team with a one-line justification
-     per conditional persona before dispatching. (Skip the cross-model \`codex-reviewer\` CE agent - it needs
-     the Codex CLI and is out of scope for a grok-only run.)
-   CONCURRENCY + RATE LIMITS: dispatch subagents $CONC_SHORT, never a big fan-out; on a 429 back off and RETRY
-   the same dispatch (per the rate-limit rule) - every SELECTED persona MUST complete, do not drop any.
-   Aggregate all findings across personas."
+  # Build an EXPLICIT, numbered per-persona dispatch list. grok follows literal dispatch commands but
+  # PARAPHRASES the personas (and skips the file Read) when told abstractly to "select from the catalog
+  # and dispatch each" - proven across runs #817/#818/#819 (0 persona-file reads). Core set = 4 always-on
+  # + 5 backend-relevant cross-cutting conditionals, each with its full path baked in so the subagent
+  # reads the GENUINE persona prompt. (bash can't read the diff for true conditional selection, so the
+  # recipe also invites grok to ADD the stack-specific / migration personas, same pattern, if warranted.)
+  PERSONA_DISPATCHES=""; n=0
+  for p in ce-correctness-reviewer ce-testing-reviewer ce-maintainability-reviewer ce-project-standards-reviewer \
+           ce-security-reviewer ce-performance-reviewer ce-api-contract-reviewer ce-reliability-reviewer ce-adversarial-reviewer; do
+    [ -f "$CE_AGENTS_DIR/$p.md" ] || continue
+    n=$((n+1))
+    PERSONA_DISPATCHES="$PERSONA_DISPATCHES
+     ${n}. general-purpose subagent, prompt VERBATIM: \"Use the Read tool to read $CE_AGENTS_DIR/$p.md and adopt that reviewer persona exactly (do not proceed until you have actually read the file). Then, as that persona, review the diff from: git diff origin/$BASE..HEAD . Report findings as P0/P1 (must-fix) or P2/P3 (nits) with file:line.\""
+  done
+  REVIEW_INSTRUCTIONS="REVIEW your committed diff (from: git diff origin/$BASE..HEAD) by running /ce-code-review's
+   genuine reviewer personas as a real subagent FLEET. grok's \`ce-*\` subagent_type dispatch is unreliable, so
+   each persona runs as a \`general-purpose\` subagent that READS its persona file. Do NOT paraphrase a persona
+   from memory and do NOT skip the Read - the genuine persona file is what makes this a real /ce-code-review.
+   DISPATCH EXACTLY THESE SUBAGENTS, using each prompt verbatim (do not summarize, do not substitute):$PERSONA_DISPATCHES
+   You MAY ALSO dispatch these CONDITIONAL personas (SAME pattern - a general-purpose subagent that FIRST Reads
+   the file) only if the diff genuinely touches their domain: ${CE_AGENTS_DIR}/ce-data-migration-reviewer.md
+   (migration/schema artifacts), ${CE_AGENTS_DIR}/ce-julik-frontend-races-reviewer.md (async/Stimulus/Turbo/DOM),
+   ${CE_AGENTS_DIR}/ce-swift-ios-reviewer.md (Swift/iOS), ${CE_AGENTS_DIR}/ce-previous-comments-reviewer.md (only
+   when the PR already has prior review comments). Skip the cross-model codex-reviewer (needs the Codex CLI).
+   CONCURRENCY + RATE LIMITS: dispatch subagents $CONC_SHORT; on a 429 back off and RETRY (per the rate-limit
+   rule). EVERY dispatched subagent MUST complete AND must have Read its persona file - a review whose subagents
+   did not Read ${CE_AGENTS_DIR}/ce-*.md is INVALID. Aggregate all findings, then fix every P0/P1."
 else
   REVIEW_INSTRUCTIONS="REVIEW your committed diff (\`git diff origin/$BASE..HEAD\`) by running
    /ce-code-review's method as a FLEET of \`general-purpose\` subagents (always available) - one per lens:
