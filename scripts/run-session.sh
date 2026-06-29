@@ -107,7 +107,8 @@ PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
 1. Run \`/$SKILL\`. Let the skill's OWN analysis pick the target(s): most maintenance skills scan
    the repo themselves to find their work - e.g. de-monolithize runs a census that RANKS monoliths
    and skips generated / justified-cohesive files; dead-code uses the gate's unused-symbol output.
-   Spend real effort here (parallel \`general-purpose\` subagents are encouraged) - choosing the right
+   Spend real effort here (\`general-purpose\` subagents are encouraged, but run AT MOST 2 at once -
+   this account rate-limits; see the rate-limit rule) - choosing the right
    target IS part of the job. Do NOT fixate on one pre-chosen file. $HINT. Preserve all behavior, the public API
    surface, types, tests, validation, error handling, and security/auth. Never weaken or delete a test.
 
@@ -126,8 +127,13 @@ PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
    them fails with "unknown variant". Do NOT retry \`ce-*\`. Instead run the fleet with the types
    you DO have: dispatch one \`code-reviewer\` subagent over the full diff, AND one \`generalPurpose\`
    subagent PER LENS - correctness, tests, maintainability, security/safety - each given the
-   relevant \`/ce-code-review\` lens instructions. Run them in parallel. Collect every finding as
-   must-fix (P0/P1) or nit (P2/P3).
+   relevant \`/ce-code-review\` lens instructions.
+   CONCURRENCY + RATE LIMITS: run these in small batches of AT MOST 2 at once, never all at once.
+   Dispatch \`code-reviewer\` FIRST; if it returns a 429 / rate-limit, back off and RETRY it (per the
+   rate-limit rule) - do NOT skip it or downgrade that pass to general-purpose. Then run the per-lens
+   \`generalPurpose\` subagents 2 at a time. The full intended fleet (code-reviewer + all 4 lenses)
+   MUST actually complete - if any subagent is rate-limited, wait and retry rather than dropping it.
+   Collect every finding as must-fix (P0/P1) or nit (P2/P3).
 
 5. Re-run the gate (\`$GATE\`) - it MUST stay green after any review fixes; commit any fix the
    review skill did not already commit. If P0/P1 issues remain, fix, re-gate, and review again.
@@ -154,10 +160,14 @@ fi
 
 # 5. LAUNCH THE SERVICE - it runs the whole loop on its own credits.
 #    NOTE: no --effort/--reasoning-effort (grok-composer-2.5-fast rejects it).
+#    --rules appends a session-wide rate-limit discipline: grok accounts 429 hard under heavy
+#    subagent fan-out, and the agent was abandoning rate-limited subagents (e.g. code-reviewer)
+#    instead of backing off. This rule caps concurrency and forces backoff+retry over downgrade.
+GROK_RULES="Rate-limit discipline (this account 429s under load): never run more than 2 subagents (Task tool) at the same time - dispatch in small batches, never a big fan-out. If ANY tool or subagent call returns 429 / 'Too Many Requests' / 'rate limit', do NOT abandon it and do NOT silently downgrade to a weaker subagent type: back off via the shell (sleep 30s, then 60s, then 120s) and retry the SAME call up to 3 times. Only give up after 3 failed retries, and say so explicitly in your summary."
 echo "-- launching $SERVICE (this is the long-running part; it burns $SERVICE credits) --"
 INVOKE_OK=1
 if [ "$SERVICE" = grok ]; then
-  grok --prompt-file "$RECIPE" --cwd "$WORKTREE" \
+  grok --prompt-file "$RECIPE" --cwd "$WORKTREE" --rules "$GROK_RULES" \
        --always-approve --disable-web-search --no-memory --max-turns "$MAXTURNS" \
        --output-format json --debug --debug-file "$LOG/service-debug.log" \
        > "$LOG/service-out.json" 2> "$LOG/service-err.log" || INVOKE_OK=0
