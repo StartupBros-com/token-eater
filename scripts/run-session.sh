@@ -88,6 +88,36 @@ else
   exit 3
 fi
 
+# 3b. DISCOVER REAL ce-* REVIEWER PERSONAS for the review fleet.
+#     grok's ce-* SUBAGENT_TYPE dispatch is unreliable (its Task registry is inconsistent run-to-run;
+#     native-4 dominates - proven across MCP/--agents/plugin-install/delay/warmup probes). But the
+#     ce-* personas are just markdown prompts, and `general-purpose` IS available every run. So we run
+#     the GENUINE personas via general-purpose subagents that read+adopt each persona file.
+CE_AGENTS_DIR="$(ls -d "$HOME"/.claude/plugins/marketplaces/*/plugins/compound-engineering/agents 2>/dev/null | head -1)"
+[ -z "$CE_AGENTS_DIR" ] && CE_AGENTS_DIR="$(ls -d "$HOME"/.claude/agents 2>/dev/null | head -1)"
+REVIEW_PERSONAS=""
+if [ -n "$CE_AGENTS_DIR" ]; then
+  for p in ce-correctness-reviewer ce-security-reviewer ce-maintainability-reviewer ce-testing-reviewer; do
+    [ -f "$CE_AGENTS_DIR/$p.md" ] && REVIEW_PERSONAS="$REVIEW_PERSONAS
+       - ${p#ce-}: $CE_AGENTS_DIR/$p.md"
+  done
+fi
+if [ -n "$REVIEW_PERSONAS" ]; then
+  REVIEW_INSTRUCTIONS="REVIEW your committed diff (\`git diff origin/$BASE..HEAD\`) by running the REAL
+   /ce-code-review reviewer personas as a FLEET. grok's \`ce-*\` subagent_type dispatch is NOT reliable,
+   so do NOT dispatch \`compound-engineering:ce-*\` types directly. Instead, for EACH persona below,
+   dispatch a \`general-purpose\` subagent (always available) whose prompt is: \"Read the file <PATH> and
+   FULLY ADOPT the reviewer persona it defines. Then review this diff: <paste git diff origin/$BASE..HEAD>.
+   Report findings as P0/P1 (must-fix) or P2/P3 (nits).\" The personas (lens: persona-file):$REVIEW_PERSONAS
+   Run at most 2 subagents at once (rate limits); on a 429 back off and RETRY the same dispatch (per the
+   rate-limit rule) - every persona MUST complete. Aggregate all findings."
+else
+  REVIEW_INSTRUCTIONS="REVIEW your committed diff (\`git diff origin/$BASE..HEAD\`) by running
+   /ce-code-review's method as a FLEET of \`general-purpose\` subagents (always available) - one per lens:
+   correctness, tests, maintainability, security/safety - each given the relevant lens instructions and
+   the diff. Run at most 2 at once; on a 429 back off and retry. Collect P0/P1 and nits."
+fi
+
 # 4. RENDER THE RECIPE - the self-contained instruction grok runs autonomously
 RECIPE="$LOG/recipe.txt"
 cat > "$RECIPE" <<EOF
@@ -119,24 +149,7 @@ PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
 3. Commit on the CURRENT branch (never \`$BASE\`):
        git add -A && git commit -m "<concise message>"
 
-4. REVIEW your committed diff by running \`/ce-code-review\` and following its method. The review
-   MUST be a real FLEET of parallel reviewer subagents, not a single inline pass. Run the fleet
-   over your committed diff (\`git diff origin/$BASE..HEAD\`).
-   Your Task tool's available subagent types vary by run, but the RELIABLE common set is grok's
-   native types (\`generalPurpose\`, \`code-reviewer\`). Build the fleet like this:
-     - PRIMARY (always available): dispatch one \`code-reviewer\` subagent over the whole diff, PLUS
-       one \`general-purpose\` subagent per lens - correctness, tests, maintainability,
-       security/safety - each given the relevant \`/ce-code-review\` lens instructions.
-     - OPPORTUNISTIC BONUS: if the richer \`compound-engineering:ce-*\` reviewer personas happen to be
-       available this run (ce-correctness-reviewer, ce-security-reviewer, ce-maintainability-reviewer,
-       ce-testing-reviewer), use them for the lenses instead - they are the genuine review personas.
-     - On any "Unknown subagent type" error, the message LISTS the valid types; pick the closest
-       reviewers from THAT list. Do NOT retry a type that just failed. \`general-purpose\` works in
-       every run - it is the guaranteed fallback.
-   Never collapse to an inline review - always run an actual subagent fleet. CONCURRENCY + RATE
-   LIMITS: at most 2 subagents at once, never a big fan-out; on a
-   429/rate-limit, back off and RETRY the SAME dispatch (per the rate-limit rule) rather than dropping
-   it - the intended fleet MUST complete. Collect every finding as must-fix (P0/P1) or nit (P2/P3).
+4. $REVIEW_INSTRUCTIONS
 
 5. Re-run the gate (\`$GATE\`) - it MUST stay green after any review fixes; commit any fix the
    review skill did not already commit. If P0/P1 issues remain, fix, re-gate, and review again.
