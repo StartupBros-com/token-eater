@@ -7,8 +7,14 @@
 # The service does the work on ITS OWN credits; this script is the launcher + guardrail.
 #
 # Usage:
-#   run-session.sh --repo <path> --skill <skill-name> --gate "<cmd>" --target "<hint>" \
-#                  [--service grok] [--rounds 2] [--slug de-monolith] [--max-turns 150] [--dry-run]
+#   run-session.sh --repo <path> --skill <skill-name> --gate "<cmd>" [--target "<hint>"] \
+#                  [--service grok] [--rounds 2] [--slug de-monolith] [--max-turns 150] \
+#                  [--pace gentle|thorough] [--dry-run]
+#
+# --pace gentle (default): dispatch subagents serially - safe for a lightly-used / low-tier grok
+#        account that 429s easily. --pace thorough: up to 3 in parallel, for accounts with headroom.
+# Rate-limit resilience is built in: if grok makes no progress under heavy 429s, the engine backs
+# off (exponential) and RESUMES via `grok --continue`, escalating to --no-subagents.
 #
 # Exit: 0 = draft PR opened and gate verified green
 #       2 = bad usage / preflight failure (no changes made)
@@ -137,7 +143,7 @@ if [ -n "$CE_AGENTS_DIR" ] && [ -f "$CE_AGENTS_DIR/ce-correctness-reviewer.md" ]
      All persona files live in ${CE_AGENTS_DIR}/. ANNOUNCE the selected team with a one-line justification
      per conditional persona before dispatching. (Skip the cross-model \`codex-reviewer\` CE agent - it needs
      the Codex CLI and is out of scope for a grok-only run.)
-   CONCURRENCY + RATE LIMITS: at most 2 subagents at once, never a big fan-out; on a 429 back off and RETRY
+   CONCURRENCY + RATE LIMITS: dispatch subagents $CONC_SHORT, never a big fan-out; on a 429 back off and RETRY
    the same dispatch (per the rate-limit rule) - every SELECTED persona MUST complete, do not drop any.
    Aggregate all findings across personas."
 else
@@ -145,7 +151,7 @@ else
    /ce-code-review's method as a FLEET of \`general-purpose\` subagents (always available) - one per lens:
    correctness, tests, maintainability, project-standards, plus security/performance/reliability/
    api-contract/data-migration WHERE the diff touches them - each given the relevant lens instructions and
-   the diff. Run at most 2 at once; on a 429 back off and retry. Collect P0/P1 and nits."
+   the diff. Dispatch them $CONC_SHORT; on a 429 back off and retry. Collect P0/P1 and nits."
 fi
 
 # 4. RENDER THE RECIPE - the self-contained instruction grok runs autonomously
@@ -167,8 +173,8 @@ PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
 1. Run \`/$SKILL\`. Let the skill's OWN analysis pick the target(s): most maintenance skills scan
    the repo themselves to find their work - e.g. de-monolithize runs a census that RANKS monoliths
    and skips generated / justified-cohesive files; dead-code uses the gate's unused-symbol output.
-   Spend real effort here (\`general-purpose\` subagents are encouraged, but run AT MOST 2 at once -
-   this account rate-limits; see the rate-limit rule) - choosing the right
+   Spend real effort here (\`general-purpose\` subagents are encouraged, but dispatch them $CONC_SHORT -
+   see the rate-limit rule) - choosing the right
    target IS part of the job. Do NOT fixate on one pre-chosen file. $HINT. Preserve all behavior, the public API
    surface, types, tests, validation, error handling, and security/auth. Never weaken or delete a test.
 
@@ -209,14 +215,38 @@ fi
 #    --rules appends a session-wide rate-limit discipline: grok accounts 429 hard under heavy
 #    subagent fan-out, and the agent was abandoning rate-limited subagents (e.g. code-reviewer)
 #    instead of backing off. This rule caps concurrency and forces backoff+retry over downgrade.
-GROK_RULES="Rate-limit discipline (this account 429s under load): never run more than 2 subagents (Task tool) at the same time - dispatch in small batches, never a big fan-out. If ANY tool or subagent call returns 429 / 'Too Many Requests' / 'rate limit', do NOT abandon it and do NOT silently downgrade to a weaker subagent type: back off via the shell (sleep 30s, then 60s, then 120s) and retry the SAME call up to 3 times. Only give up after 3 failed retries, and say so explicitly in your summary."
+GROK_RULES="Rate-limit discipline (this account may 429 under load). $CONCURRENCY If ANY tool or subagent call returns 429 / 'Too Many Requests' / 'rate limit', do NOT abandon it and do NOT silently downgrade to a weaker subagent type: back off via the shell (sleep 30s, then 60s, then 120s) and retry the SAME call up to 3 times. Only give up after 3 failed retries, and say so explicitly in your summary."
 echo "-- launching $SERVICE (this is the long-running part; it burns $SERVICE credits) --"
 INVOKE_OK=1
 if [ "$SERVICE" = grok ]; then
-  grok --prompt-file "$RECIPE" --cwd "$WORKTREE" --rules "$GROK_RULES" \
-       --always-approve --disable-web-search --no-memory --max-turns "$MAXTURNS" \
-       --output-format json --debug --debug-file "$LOG/service-debug.log" \
-       > "$LOG/service-out.json" 2> "$LOG/service-err.log" || INVOKE_OK=0
+  # token-eater-OWNED rate-limit resilience (do NOT rely on grok self-policing - it is unreliable):
+  # launch grok; if it makes NO progress (zero commits) AND the logs show rate-limiting, deterministically
+  # back off (exponential, jittered, capped) and RESUME the same session via --continue - escalating to
+  # --no-subagents (no fan-out -> minimal 429 pressure) so even a brand-new, low-tier grok account
+  # eventually lands the core work. grok that simply grinds through 429s and commits is left alone.
+  GROK_COMMON=(--cwd "$WORKTREE" --rules "$GROK_RULES" --always-approve --disable-web-search
+               --no-memory --max-turns "$MAXTURNS" --output-format json
+               --debug --debug-file "$LOG/service-debug.log")
+  grok --prompt-file "$RECIPE" "${GROK_COMMON[@]}" > "$LOG/service-out.json" 2> "$LOG/service-err.log" || true
+  resume=0; max_resumes=3
+  while :; do
+    commits="$(git -C "$WORKTREE" rev-list --count "origin/$BASE..HEAD" 2>/dev/null || echo 0)"
+    [ "${commits:-0}" -ge 1 ] && break                       # grok produced work -> proceed to the gate
+    if [ "$resume" -ge "$max_resumes" ] || ! grep -qiE '429|too many requests|rate.?limit' "$LOG/service-err.log" "$LOG/service-out.json" 2>/dev/null; then
+      break                                                  # not rate-limited, or out of resume budget
+    fi
+    back=$(( 60 * (1 << resume) )); [ "$back" -gt 300 ] && back=300; back=$(( back + RANDOM % 25 ))
+    gentle=""; [ "$resume" -ge 1 ] && gentle="--no-subagents"   # escalate gentleness after the 1st resume
+    echo "  rate-limited with no progress; backing off ${back}s then resuming (resume $((resume+1))/$max_resumes${gentle:+ $gentle})"
+    sleep "$back"
+    grok --continue "${GROK_COMMON[@]}" $gentle \
+         -p "Continue this token-eater session where you left off. You were rate-limited (429). Proceed gently: run any subagents ONE AT A TIME, and on a 429 sleep and retry rather than giving up. Finish the procedure - keep the gate green, review-and-fix, then open the DRAFT PR." \
+         >> "$LOG/service-out.json" 2>> "$LOG/service-err.log" || true
+    resume=$(( resume + 1 ))
+  done
+  commits="$(git -C "$WORKTREE" rev-list --count "origin/$BASE..HEAD" 2>/dev/null || echo 0)"
+  [ "${commits:-0}" -ge 1 ] || INVOKE_OK=0
+  [ "$resume" -gt 0 ] && echo "  (resumed $resume time/s through rate-limit backoff)"
 else
   # codex / claude: delegate via their runner (single rich prompt; agentic loop inside)
   bash "$HERE/delegate-$SERVICE.sh" "$WORKTREE" "$RECIPE" > "$LOG/service-out.json" 2> "$LOG/service-err.log" || INVOKE_OK=0

@@ -56,7 +56,7 @@ A token-eater run is **one session**: one service, one skill, one polished draft
    bash <skill-dir>/scripts/run-session.sh \
      --repo <project-path> --service <service> \
      --skill <skill-name> --gate "<gate command>" \
-     --rounds 2 [--target "<optional scope hint>"]
+     --rounds 2 [--pace gentle|thorough] [--target "<optional scope hint>"]
    ```
 
    Add `--dry-run` to render the recipe and stop. The service then runs the whole loop (skill -> gate -> review + fix via `/ce-code-review`, up to `--rounds` rounds -> push -> draft PR) on its own credits. This is the long-running part.
