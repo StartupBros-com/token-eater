@@ -18,7 +18,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SERVICE=grok; ROUNDS=2; SLUG=session; MAXTURNS=150; DRYRUN=0
+SERVICE=grok; ROUNDS=2; SLUG=session; MAXTURNS=150; DRYRUN=0; PACE=gentle
 REPO=""; SKILL=""; GATE=""; TARGET=""
 
 die() { echo "token-eater: $*" >&2; exit 2; }
@@ -32,6 +32,7 @@ while [ "$#" -gt 0 ]; do
     --rounds) ROUNDS="$2"; shift 2;;
     --slug) SLUG="$2"; shift 2;;
     --max-turns) MAXTURNS="$2"; shift 2;;
+    --pace) PACE="$2"; shift 2;;
     --dry-run) DRYRUN=1; shift;;
     *) die "unknown arg: $1";;
   esac
@@ -46,6 +47,18 @@ if [ -n "$TARGET" ]; then
 else
   GOAL_LINE="Find and fix the best target(s) the /$SKILL skill identifies in this repository — let the skill's own analysis choose what and how much to touch."
   HINT="No target was pre-chosen — the skill must identify the target itself via its own analysis/census"
+fi
+
+# Pace controls subagent CONCURRENCY - the dominant 429 driver. A lightly-used grok account has a low
+# rate-limit tier (it scales with historical spend), so a parallel subagent fan-out 429-storms it and
+# the backoff sleeps dominate wall-clock. Default 'gentle' paces UNDER the limit (serial dispatch),
+# which both protects a first-time/low-tier account and avoids the wasted 429+backoff cycles.
+if [ "$PACE" = thorough ]; then
+  CONC_SHORT="up to 3 in parallel"
+  CONCURRENCY="You MAY run up to 3 subagents (Task tool) in parallel - this account has rate-limit headroom (thorough pace)."
+else
+  CONC_SHORT="ONE AT A TIME (serial)"
+  CONCURRENCY="Run subagents (Task tool) ONE AT A TIME - never spawn the next until the current one returns. This account may be lightly used and heavily rate-limited; serial dispatch stays under the limit and avoids 429 storms."
 fi
 [ -d "$REPO/.git" ] || die "not a git repo: $REPO"
 command -v "$SERVICE" >/dev/null 2>&1 || die "service CLI not found: $SERVICE"
@@ -88,33 +101,50 @@ else
   exit 3
 fi
 
-# 3b. DISCOVER REAL ce-* REVIEWER PERSONAS for the review fleet.
+# 3b. DISCOVER the REAL /ce-code-review persona roster for the review fleet.
 #     grok's ce-* SUBAGENT_TYPE dispatch is unreliable (its Task registry is inconsistent run-to-run;
 #     native-4 dominates - proven across MCP/--agents/plugin-install/delay/warmup probes). But the
 #     ce-* personas are just markdown prompts, and `general-purpose` IS available every run. So we run
-#     the GENUINE personas via general-purpose subagents that read+adopt each persona file.
+#     /ce-code-review's GENUINE personas - the full tiered roster + its real selection logic - via
+#     general-purpose subagents that read+adopt each persona file. Point grok at the actual
+#     persona-catalog (selection rules) + agents dir rather than hardcoding a subset.
+CE_SKILL_DIR="$(ls -d "$HOME"/.claude/plugins/marketplaces/*/plugins/compound-engineering/skills/ce-code-review 2>/dev/null | head -1)"
 CE_AGENTS_DIR="$(ls -d "$HOME"/.claude/plugins/marketplaces/*/plugins/compound-engineering/agents 2>/dev/null | head -1)"
 [ -z "$CE_AGENTS_DIR" ] && CE_AGENTS_DIR="$(ls -d "$HOME"/.claude/agents 2>/dev/null | head -1)"
-REVIEW_PERSONAS=""
-if [ -n "$CE_AGENTS_DIR" ]; then
-  for p in ce-correctness-reviewer ce-security-reviewer ce-maintainability-reviewer ce-testing-reviewer; do
-    [ -f "$CE_AGENTS_DIR/$p.md" ] && REVIEW_PERSONAS="$REVIEW_PERSONAS
-       - ${p#ce-}: $CE_AGENTS_DIR/$p.md"
-  done
-fi
-if [ -n "$REVIEW_PERSONAS" ]; then
-  REVIEW_INSTRUCTIONS="REVIEW your committed diff (\`git diff origin/$BASE..HEAD\`) by running the REAL
-   /ce-code-review reviewer personas as a FLEET. grok's \`ce-*\` subagent_type dispatch is NOT reliable,
-   so do NOT dispatch \`compound-engineering:ce-*\` types directly. Instead, for EACH persona below,
-   dispatch a \`general-purpose\` subagent (always available) whose prompt is: \"Read the file <PATH> and
-   FULLY ADOPT the reviewer persona it defines. Then review this diff: <paste git diff origin/$BASE..HEAD>.
-   Report findings as P0/P1 (must-fix) or P2/P3 (nits).\" The personas (lens: persona-file):$REVIEW_PERSONAS
-   Run at most 2 subagents at once (rate limits); on a 429 back off and RETRY the same dispatch (per the
-   rate-limit rule) - every persona MUST complete. Aggregate all findings."
+CE_CATALOG=""
+[ -n "$CE_SKILL_DIR" ] && [ -f "$CE_SKILL_DIR/references/persona-catalog.md" ] && CE_CATALOG="$CE_SKILL_DIR/references/persona-catalog.md"
+
+if [ -n "$CE_AGENTS_DIR" ] && [ -f "$CE_AGENTS_DIR/ce-correctness-reviewer.md" ]; then
+  REVIEW_INSTRUCTIONS="REVIEW your committed diff (\`git diff origin/$BASE..HEAD\`) by running the FULL
+   /ce-code-review review with its REAL tiered persona roster and selection logic.
+   MECHANISM (critical): grok's \`ce-*\` subagent_type dispatch is NOT reliable, so do NOT dispatch
+   \`compound-engineering:ce-*\` Task types. Instead run EACH selected persona as a \`general-purpose\`
+   subagent (always available) prompted EXACTLY: \"Read the file ${CE_AGENTS_DIR}/<persona>.md and FULLY
+   ADOPT that reviewer persona. Then review this diff: <paste the full git diff origin/$BASE..HEAD>.
+   Report findings as P0/P1 (must-fix) or P2/P3 (nits) with file:line.\"
+   SELECTION: follow the real catalog${CE_CATALOG:+ at $CE_CATALOG}.
+     ALWAYS-ON - spawn all 4 every time: ce-correctness-reviewer, ce-testing-reviewer,
+       ce-maintainability-reviewer, ce-project-standards-reviewer.
+     CROSS-CUTTING CONDITIONAL - read the diff and spawn each whose domain it genuinely touches (judgment,
+       not keyword match): ce-security-reviewer (auth/endpoints/input/secrets), ce-performance-reviewer
+       (DB queries/loops/caching/async), ce-api-contract-reviewer (routes/serializers/exported types/
+       versioning), ce-data-migration-reviewer (migration or schema artifacts ONLY), ce-reliability-reviewer
+       (error handling/retries/timeouts/background jobs), ce-adversarial-reviewer (>=50 changed non-test/
+       non-generated lines OR auth/payments/data-mutation/external-API), ce-previous-comments-reviewer
+       (ONLY when reviewing a PR that already has prior review comments).
+     STACK-SPECIFIC CONDITIONAL - spawn only if the diff has real work for them: ce-julik-frontend-races-reviewer
+       (Stimulus/Turbo/DOM/timers/async UI), ce-swift-ios-reviewer (Swift/SwiftUI/UIKit/iOS project files).
+     All persona files live in ${CE_AGENTS_DIR}/. ANNOUNCE the selected team with a one-line justification
+     per conditional persona before dispatching. (Skip the cross-model \`codex-reviewer\` CE agent - it needs
+     the Codex CLI and is out of scope for a grok-only run.)
+   CONCURRENCY + RATE LIMITS: at most 2 subagents at once, never a big fan-out; on a 429 back off and RETRY
+   the same dispatch (per the rate-limit rule) - every SELECTED persona MUST complete, do not drop any.
+   Aggregate all findings across personas."
 else
   REVIEW_INSTRUCTIONS="REVIEW your committed diff (\`git diff origin/$BASE..HEAD\`) by running
    /ce-code-review's method as a FLEET of \`general-purpose\` subagents (always available) - one per lens:
-   correctness, tests, maintainability, security/safety - each given the relevant lens instructions and
+   correctness, tests, maintainability, project-standards, plus security/performance/reliability/
+   api-contract/data-migration WHERE the diff touches them - each given the relevant lens instructions and
    the diff. Run at most 2 at once; on a 429 back off and retry. Collect P0/P1 and nits."
 fi
 
