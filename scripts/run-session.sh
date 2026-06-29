@@ -96,7 +96,7 @@ else
   CONC_SHORT="ONE AT A TIME (serial)"
   CONCURRENCY="Run subagents (Task tool) ONE AT A TIME - never spawn the next until the current one returns. This account may be lightly used and heavily rate-limited; serial dispatch stays under the limit and avoids 429 storms."
 fi
-[ -d "$REPO/.git" ] || die "not a git repo: $REPO"
+git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a git repo: $REPO"  # .git can be a FILE in a linked worktree
 command -v "$SERVICE" >/dev/null 2>&1 || die "service CLI not found: $SERVICE"
 
 REPO="$(cd "$REPO" && pwd)"
@@ -182,9 +182,12 @@ fi
 #     /ce-code-review's GENUINE personas - the full tiered roster + its real selection logic - via
 #     general-purpose subagents that read+adopt each persona file. Point grok at the actual
 #     persona-catalog (selection rules) + agents dir rather than hardcoding a subset.
-CE_SKILL_DIR="$(ls -d "$HOME"/.claude/plugins/marketplaces/*/plugins/compound-engineering/skills/ce-code-review 2>/dev/null | head -1)"
-CE_AGENTS_DIR="$(ls -d "$HOME"/.claude/plugins/marketplaces/*/plugins/compound-engineering/agents 2>/dev/null | head -1)"
-[ -z "$CE_AGENTS_DIR" ] && CE_AGENTS_DIR="$(ls -d "$HOME"/.claude/agents 2>/dev/null | head -1)"
+# `|| true` is required: an empty glob makes `ls` exit non-zero and pipefail propagates it, which under
+# set -e would ABORT the whole run before the generic-review fallback - i.e. token-eater would die on any
+# machine without the compound-engineering plugin installed (every non-HoV / fresh machine).
+CE_SKILL_DIR="$(ls -d "$HOME"/.claude/plugins/marketplaces/*/plugins/compound-engineering/skills/ce-code-review 2>/dev/null | head -1 || true)"
+CE_AGENTS_DIR="$(ls -d "$HOME"/.claude/plugins/marketplaces/*/plugins/compound-engineering/agents 2>/dev/null | head -1 || true)"
+[ -z "$CE_AGENTS_DIR" ] && CE_AGENTS_DIR="$(ls -d "$HOME"/.claude/agents 2>/dev/null | head -1 || true)"
 CE_CATALOG=""
 [ -n "$CE_SKILL_DIR" ] && [ -f "$CE_SKILL_DIR/references/persona-catalog.md" ] && CE_CATALOG="$CE_SKILL_DIR/references/persona-catalog.md"
 
@@ -281,13 +284,13 @@ PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
 
 5. $REGATE_STEP
 
-6. Push the branch and open a DRAFT pull request against \`$BASE\` on $ORIGIN_SLUG:
+6. Push the branch. Do NOT open a pull request yourself - token-eater opens the DRAFT PR itself only
+   AFTER it independently re-verifies the gate, so a red-gate or non-draft PR can never appear:
        git push -u origin $BRANCH
-       gh pr create --repo $ORIGIN_SLUG --base $BASE --draft --title "<title>" --body "<plain summary; $PR_GATE_NOTE>"
-   The PR MUST be a draft. NEVER merge it, NEVER mark it ready, NEVER push to \`$BASE\`.
+   NEVER open a PR, NEVER merge, NEVER mark anything ready, NEVER push to \`$BASE\`.
 
 FINAL OUTPUT: a summary - files changed, final gate result, how many review rounds, any nits left
-for the human, and the draft PR URL.
+for the human (token-eater will open the draft PR).
 
 HARD RULES: stay in this worktree; keep the gate green at every commit; draft PR only; never merge;
 never touch \`$BASE\`; never weaken tests, validation, error handling, or security checks.
@@ -361,16 +364,24 @@ if [ "$GATEOK" = 0 ]; then
   exit 4
 fi
 if [ "${COMMITS:-0}" -lt 1 ]; then
-  echo "token-eater: gate green but the service made no commits - nothing to ship."
   bash "$HERE/wt.sh" cleanup "$REPO" "$WORKTREE" drop >/dev/null 2>&1 || true
+  if [ "$INVOKE_OK" = 0 ]; then
+    # The service crashed / failed to complete (auth, rate-limit, delegate error). Zero commits here is
+    # a FAILURE, not a clean no-op - don't let callers read it as success.
+    echo "token-eater: $SERVICE did not complete (no commits). See $LOG/service-err.log" >&2
+    exit 2
+  fi
+  echo "token-eater: the service made no commits - nothing to ship (model reported no changes needed)."
   exit 0
 fi
 
-# 7. ENSURE A DRAFT PR EXISTS (the service usually opens it; if not, we do - draft, on origin).
+# 7. OPEN THE DRAFT PR ourselves - only now, AFTER the independent gate verify above. The worker only
+#    pushed; token-eater owns PR creation so a red-gate/non-draft PR can never exist. (If a PR somehow
+#    already exists for this branch, reuse it.)
 if [ "$GATE_TIER" = soft ]; then GATE_SUMMARY="no automated gate (AI-review-only)"; else GATE_SUMMARY="gate \`$GATE\` passes"; fi
 PR_URL="$(gh pr list --repo "$ORIGIN_SLUG" --head "$BRANCH" --json url --jq '.[0].url' 2>/dev/null || true)"
 if [ -z "$PR_URL" ]; then
-  echo "-- service did not open a PR; opening a draft PR ourselves --"
+  echo "-- opening the draft PR (after independent gate verification) --"
   git -C "$WORKTREE" push -u origin "$BRANCH" >/dev/null 2>&1 || true
   PR_URL="$(gh pr create --repo "$ORIGIN_SLUG" --base "$BASE" --head "$BRANCH" --draft \
               --title "chore(token-eater): $SLUG" \
