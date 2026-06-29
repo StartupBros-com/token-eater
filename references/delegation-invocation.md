@@ -1,6 +1,6 @@
 # Delegation invocation
 
-This playbook runs one eligible chore on one adapter. It is the isolation and verification boundary for token-eater: every delegated task runs in a fresh git worktree, returns a constrained 5-field result, and survives only if the deterministic gate passes (R12, R13, R15). Provider failures are classified so the harvest loop can park noisy adapters and continue with the others (R16).
+This playbook runs one eligible chore on one service. It is the isolation and verification boundary for token-eater: every delegated task runs in a fresh git worktree, returns a constrained 5-field result, and survives only if the deterministic gate passes (R12, R13, R15). Service failures are classified so the run loop can park a service and continue with the next one in your list.
 
 The shape mirrors the proven Codex delegation harness: pass file paths instead of large file contents, launch headless work in the background, poll separately, and roll back the worktree on red.
 
@@ -72,7 +72,7 @@ Use the exit code, and keep the printed message for the run summary or `issues[]
 | Exit | Status | Action |
 | --- | --- | --- |
 | `0` | `ready` | Proceed to the headless-contract preflight. |
-| `3` | `needs-reauth` | Park the adapter for this run with the printed plain-language message. If this is the configured implementer and the grok-tapped posture says `pause-on-tapped`, pause the run. Never invoke an adapter that could hang on interactive sign-in. |
+| `3` | `needs-reauth` | Park this service for the run with the printed plain-language message and move to the next service in your list; if none remains, stop. Never invoke a CLI that could hang on interactive sign-in. |
 | `2` | `unknown` | Proceed, but add the printed risk message to `issues[]` so the member can see what was uncertain. |
 
 Example `needs-reauth` message for Grok: "Open a terminal, run `grok`, sign in, then run token-eater again." Keep this wording plain; House of Vibe members should not need to understand OAuth, tokens, or adapter internals.
@@ -127,7 +127,7 @@ Run these steps for each chore selected by the harvest loop.
    - Explicit files or paths it must not touch.
    - Success criterion tied to the deterministic gate.
    - The gate command token-eater will run after delegation.
-   - Chore tier and adapter id.
+   - The service id doing the chore.
    - Safety constraints from `references/chore-discovery.md`, including "never simplify away a safety check" for deslop/simplify chores.
    - The required 5-field JSON result schema.
 
@@ -204,8 +204,7 @@ Use this structure, filling every bracketed field:
 You are running one token-eater maintenance chore in an isolated git worktree.
 
 Task: [specific chore]
-Adapter: [provider id]
-Tier: [mechanical|standard|high]
+Service: [provider id]
 
 Allowed files:
 - [repo-relative path]
@@ -230,16 +229,16 @@ Return only JSON matching the required 5-field result schema:
 {status, files_modified, issues, summary, verification_summary}
 ```
 
-## Provider parking
+## Service parking
 
-Park a provider for the current harvest run when:
+Park a service for the current run when:
 
-- The preflight fails.
-- The adapter output matches its `circuit_breaker` regex.
-- It reaches the configured consecutive failure limit.
+- The auth preflight returns `needs-reauth`.
+- The adapter output matches its `circuit_breaker` regex (credits exhausted — for the service you are spending, this is the expected stop).
+- It reaches three consecutive failures.
 - It repeatedly produces malformed or missing result JSON.
 
-Parking is per run, not permanent. Later runs may try the provider again after the reset cadence or after setup changes.
+Parking is per run, not permanent. Later runs may try the service again after its credits reset or after the user re-authenticates.
 
 ## Adapter runners (`scripts/delegate-<adapter>.sh`)
 

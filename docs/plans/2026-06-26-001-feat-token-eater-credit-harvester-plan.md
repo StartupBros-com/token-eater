@@ -5,6 +5,13 @@ date: 2026-06-26
 origin: 2026-06-26-surplus-credit-harvester-requirements.md
 ---
 
+> **Historical design doc (superseded).** This plan describes token-eater's original
+> fleet-scheduler architecture: drain/protect postures, capability tiers, cost-routing,
+> idle windows, reserve floors, and a balance oracle. That design was deliberately
+> collapsed to a much simpler meta-skill — **you pick the service, and it spends that
+> service on any gate-verifiable chore.** For the current design, read `SKILL.md` and
+> `references/`, not this file.
+
 # feat: token-eater — surplus model-credit harvester skill
 
 **Target repo:** a new greenfield `token-eater` skill package (home TBD — member vault vs. plugin marketplace is a deferred GTM call). All paths below are relative to that package root.

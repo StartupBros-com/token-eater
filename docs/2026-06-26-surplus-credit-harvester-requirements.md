@@ -3,6 +3,12 @@ date: 2026-06-26
 topic: surplus-credit-harvester
 ---
 
+> **Historical requirements doc (superseded).** These requirements drove token-eater's
+> original fleet-scheduler design. The skill has since been simplified to a meta-skill —
+> you pick the service, and it spends that service on any gate-verifiable chore. The
+> current behavior lives in `SKILL.md` and `references/`; treat this file as historical
+> context.
+
 # token-eater — Surplus Credit Harvester — Requirements
 
 ## Summary

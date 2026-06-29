@@ -3,8 +3,8 @@
 #
 # claude enforces the schema and returns it in the stdout envelope's
 # .structured_output (reliable). The envelope also reports .total_cost_usd and
-# .usage, so this adapter can self-meter spend (useful for protect posture with no
-# oracle). files_modified + scope are still derived from git (ground truth); the
+# .usage, so this adapter can self-meter spend (useful when no balance oracle is
+# present). files_modified + scope are still derived from git (ground truth); the
 # deterministic gate stays authoritative for keep/rollback.
 #
 # Usage:
@@ -17,12 +17,13 @@ export TOKEN_EATER_DELEGATED=1   # marker so a worker that re-invokes token-eate
 
 WT="${1:?worktree dir required}"
 PROMPT="${2:?prompt file required}"
-SCHEMA="${3:?schema file required}"
+SCHEMA="${3:-}"          # OPTIONAL: the new self-contained-recipe model passes no schema (claude runs the
+                        # recipe agentically and opens its own draft PR). When given, structured output is enforced.
 ALLOWED="${4:-}"
 
 [ -d "$WT" ]     || { echo '{"adapter":"claude","ok":false,"error":"worktree not found"}'; exit 2; }
 [ -f "$PROMPT" ] || { echo '{"adapter":"claude","ok":false,"error":"prompt file not found"}'; exit 2; }
-[ -f "$SCHEMA" ] || { echo '{"adapter":"claude","ok":false,"error":"schema file not found"}'; exit 2; }
+[ -z "$SCHEMA" ] || [ -f "$SCHEMA" ] || { echo '{"adapter":"claude","ok":false,"error":"schema file not found"}'; exit 2; }
 command -v claude >/dev/null || { echo '{"adapter":"claude","ok":false,"error":"claude not installed"}'; exit 2; }
 
 WT="$(cd "$WT" && pwd)"
@@ -30,9 +31,10 @@ RUNDIR="$(mktemp -d -t te-claude-XXXXXX)"
 ENVRAW="$RUNDIR/stdout.json"; ERRLOG="$RUNDIR/stderr.log"
 CB_REGEX='(usage limit|rate.?limit|429|All accounts are temporarily unavailable)'
 
-# --- run the verified claude contract, cwd = worktree (inline prompt, inline schema) ---
+# --- run the claude contract, cwd = worktree (inline prompt; schema only if supplied) ---
+SCHEMA_ARGS=(); [ -n "$SCHEMA" ] && SCHEMA_ARGS=(--json-schema "$(cat "$SCHEMA")")
 set +e
-( cd "$WT" && claude -p "$(cat "$PROMPT")" --output-format json --json-schema "$(cat "$SCHEMA")" --permission-mode acceptEdits ) >"$ENVRAW" 2>"$ERRLOG"
+( cd "$WT" && claude -p "$(cat "$PROMPT")" --output-format json "${SCHEMA_ARGS[@]}" --permission-mode acceptEdits ) >"$ENVRAW" 2>"$ERRLOG"
 CLAUDE_EXIT=$?
 set -e
 

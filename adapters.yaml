@@ -1,7 +1,12 @@
 # token-eater provider registry
 #
-# Adding a provider = adding an entry here. The harvest loop reads this file
-# generically, so a new adapter needs no change to the loop (R3).
+# Adding a provider = adding an entry here. The run loop reads this file generically,
+# so a new adapter needs no change to the loop.
+#
+# token-eater spends whichever service(s) you point it at. There is no posture, tier, or
+# cost-routing engine: you choose the service, and the run loop spends it on any chore the
+# project's own checks can verify. So an adapter only needs to declare HOW to call its CLI
+# headlessly and HOW to tell when its credits are exhausted.
 #
 # Contract fields per adapter (see references/adapter-contract.md):
 #   id                 unique key; matches the CLI binary name used for detection
@@ -10,12 +15,12 @@
 #   result_capture     where token-eater reads the result JSON:
 #                        "file:{result_file}"  — the adapter writes it to a file
 #                        "stdout:<field>"       — parse the adapter's stdout JSON envelope, take <field>
-#   reset_cadence      how the subscription quota resets (drives time-gating for protect posture)
-#   balance_signal     "none" | "<oracle-name>" — where remaining budget can be read (optional; R10/R11)
-#   strength_tier      highest chore tier this adapter is trusted for: mechanical | standard | high
-#   circuit_breaker    regex signalling rate-limit / credit exhaustion in the CLI's output (R16)
-#   default_posture    drain | protect (R7; a non-expiring provider must never be drain)
-#   cost_rank          integer, lower = cheaper; routing prefers the cheapest in-tier adapter (R6)
+#   circuit_breaker    regex signalling rate-limit / credit exhaustion in the CLI's output. For the
+#                      service you are draining, a match is the normal "credits all spent" stop — not
+#                      an error.
+#   balance_signal     "none" | "<oracle-name>" — optional. Only the advanced `stop_when_low` setting
+#                      reads it (via scripts/onwatch-usage.sh). Absent/none just means "run until the
+#                      circuit breaker fires or the backlog empties."
 #
 # invoke placeholders (token-eater substitutes shell-escaped values; the command runs with the
 # worktree as cwd, so no --cwd is needed):
@@ -33,31 +38,19 @@ adapters:
     invoke: "grok --prompt-file {prompt_file} --json-schema {schema_json} --always-approve"
     structured_output: "--json-schema (soft)"
     result_capture: "stdout:.structuredOutput"
-    reset_cadence: "weekly-credits"
-    balance_signal: "onwatch"       # scripts/onwatch-usage.sh grok (from onwatch.db); exit 3 => none. Still drains, now with visibility (R8)
-    strength_tier: "mechanical"
     circuit_breaker: "(usage limit reached|rate.?limit|out of credits|429)"
-    default_posture: "drain"
-    cost_rank: 1
+    balance_signal: "onwatch"       # optional; only scripts/onwatch-usage.sh grok + stop_when_low use it
 
   - id: codex
     invoke: "codex exec -s workspace-write --output-schema {schema_file} -o {result_file} - < {prompt_file}"
     structured_output: "--output-schema (hard)"
     result_capture: "file:{result_file}"
-    reset_cadence: "weekly-cap"
-    balance_signal: "onwatch"       # scripts/onwatch-usage.sh codex (from /metrics); reserve floor when present, else conservative (R10)
-    strength_tier: "high"
     circuit_breaker: "(usage limit reached|rate.?limit|429 too many requests)"
-    default_posture: "protect"
-    cost_rank: 2
+    balance_signal: "onwatch"       # optional; only scripts/onwatch-usage.sh codex + stop_when_low use it
 
   - id: claude
     invoke: "claude -p {prompt_text} --output-format json --json-schema {schema_json} --permission-mode acceptEdits"
     structured_output: "--output-format json --json-schema (hard)"
     result_capture: "stdout:.structured_output"
-    reset_cadence: "5h-rolling+weekly"
-    balance_signal: "onwatch"       # scripts/onwatch-usage.sh claude->anthropic (from /metrics); reserve floor when present, else conservative (R10)
-    strength_tier: "high"
     circuit_breaker: "(usage limit|rate.?limit|429)"
-    default_posture: "protect"
-    cost_rank: 3
+    balance_signal: "onwatch"       # optional; only scripts/onwatch-usage.sh anthropic + stop_when_low use it

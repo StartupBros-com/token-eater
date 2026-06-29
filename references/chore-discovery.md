@@ -2,7 +2,7 @@
 
 Chore discovery builds the backlog token-eater may delegate. The trust boundary is simple: admit a chore only when a deterministic gate can verify it (KTD9, R5). Everything else stays out of the unattended path, even if it looks useful.
 
-The member path is fully automatic. Do not ask the user to curate a backlog, pick files, or classify chores (R19). The agent discovers cheap signals, attaches a gate and tier, and passes the resulting backlog to the harvest loop for provider routing (R6, R20).
+The member path is fully automatic. Do not ask the user to curate a backlog, pick files, or classify chores (R19). The agent discovers cheap signals, attaches a gate, and passes the resulting backlog to the run loop.
 
 ## Deterministic-gate eligibility rule
 
@@ -14,6 +14,8 @@ A candidate chore is eligible only when all of these are true:
 4. The chore can be scope-fenced to an explicit file list for delegation.
 5. The chore is not security-sensitive, architectural, speculative, or dependent on unstated product intent.
 6. The chosen gate is GREEN on the unmodified worktree at HEAD (baseline). A gate that already fails before the chore runs cannot prove the chore is safe: a later failure can't be attributed to the chore, and a broken or mis-configured gate (for example a `lint` script with no config in the project) must never be trusted. If the chosen gate is red at baseline, either fall back to a different gate that is green at baseline, or exclude the chore and say so plainly.
+
+Chores run on committed state: the worktree branches from `HEAD` (a committed ref), so any uncommitted changes in your working tree are excluded from the chore and left untouched. Evaluate the baseline gate on that same committed state, not on a dirty tree, so the result is reproducible.
 
 Allowed gate types are:
 
@@ -63,7 +65,7 @@ Do not hardcode skill names in this playbook. The catalog is the plug-in point: 
 
 **`cmd:`-detected archetypes are machine-level, not project-level.** `detect-skills.sh` reports `installed` for `formatter-idempotency` / `lint-autofix` when the *binary* exists on the machine (e.g. global `prettier` or `ruff`) - it does NOT mean THIS project uses that tool. Before admitting such a chore, confirm a project-local config or script (a `.prettierrc`/`eslint.config.*`/`ruff.toml`, or a `package.json` `format`/`lint` script). If none exists, the gate would be irrelevant to the project (eligibility rule 3) - exclude the chore and say so. `scripts/run-gate.sh`'s own detection already keys on project config, so trust the gate over the bare detector here.
 
-The deterministic-gate rule still controls admission. A resolved skill only says _how_ to draft the chore; it does not make ungated work safe. After skill resolution, apply the same success criterion, gate relevance, explicit file scope, and tier checks as every other chore (R5, R6). If an installed skill wants to touch files outside the chore's allowed file list, narrow the prompt or skip the chore.
+The deterministic-gate rule still controls admission. A resolved skill only says _how_ to draft the chore; it does not make ungated work safe. After skill resolution, apply the same success criterion, gate relevance, and explicit file scope checks as every other chore (R5). If an installed skill wants to touch files outside the chore's allowed file list, narrow the prompt or skip the chore.
 
 Special cases:
 
@@ -87,24 +89,12 @@ Use cheap, local signals first. Avoid expensive whole-repo analysis unless a gat
 
 Signals identify candidates; gates decide eligibility.
 
-## Tiers
-
-Tag every admitted chore with one tier:
-
-| Tier         | Meaning                                                                                                                                          | Minimum adapter tier |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------- |
-| `mechanical` | Formatting, import sorting, generated obvious lint fixes, small dead-code removals proven by lint/type gates.                                    | `mechanical`         |
-| `standard`   | Local code cleanup, de-slopifying comments/docs, straightforward test backfills from existing patterns, simple dependency-safe repairs.          | `standard`           |
-| `high`       | Multi-file changes, type repairs crossing module boundaries, tests requiring nuanced behavior inference, build fixes with moderate blast radius. | `high`               |
-
-Routing uses the cheapest available adapter whose `strength_tier` covers the chore tier (R6). A high-tier provider may do mechanical work only when cheaper or lower-tier surplus is unavailable and the provider posture permits harvesting.
-
 ## Execution mode
 
 Every admitted chore also carries an execution mode from `skills-catalog.yaml`:
 
-- `exec: tool` means a deterministic fixer does the work perfectly. Run the fixer directly through `scripts/apply-tool.sh`; do not route the chore to a model, do not check model posture, and do not spend credits. Formatter idempotency and lint autofix are the canonical tool chores.
-- `exec: model` means judgment is needed. Build the scope-fenced prompt as usual and let the harvest loop route it to an adapter whose tier, posture, and available surplus permit the run.
+- `exec: tool` means a deterministic fixer does the work perfectly. Run the fixer directly through `scripts/apply-tool.sh`; do not route the chore to a model and do not spend credits. Formatter idempotency and lint autofix are the canonical tool chores.
+- `exec: model` means judgment is needed. Build the scope-fenced prompt as usual and let the run loop send it to the service you chose.
 
 If the catalog omits `exec`, default to `model`. The credit-burn belongs on judgment chores, not on work a tool already performs deterministically.
 
@@ -124,17 +114,17 @@ Ad-hoc tool commands are fallback only after checking for project-owned scripts/
 
 ## Bundled safe-chore set
 
-Start with the safest mechanical chores. Add higher-tier chores only when their gate and file scope are clear.
+Start with the safest, most mechanical chores. Add chores that need more judgment only when their gate and file scope are clear.
 
-| Chore                       | What it does                                                                                         | Gate                                                                                   | Tier         |
-| --------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------ |
-| Formatter idempotency       | Run the project formatter or make already-formatted files pass formatter check. No behavior changes. | Formatter check or run-twice idempotency through `scripts/run-gate.sh`.                | `mechanical` |
-| Unused import/local cleanup | Remove imports, variables, or declarations already reported unused by lint/type/compiler output.     | Lint, typecheck, compiler, or build.                                                   | `mechanical` |
-| Simple lint autofix         | Apply safe lint fixes for a named rule and explicit file list.                                       | Lint.                                                                                  | `mechanical` |
-| Documentation de-slop       | Tighten repetitive, placeholder, or AI-looking prose in docs without changing technical meaning.     | Markdown/documentation check if present, otherwise build/test/lint gate covering docs. | `standard`   |
-| Local code de-slop          | Simplify obvious duplication or noisy comments inside an explicit file set without behavior changes. | Existing tests plus lint/typecheck/build relevant to those files.                      | `standard`   |
-| Inferable test backfill     | Add a narrow test for behavior already expressed in code or neighboring tests.                       | Targeted test command or full test suite.                                              | `standard`   |
-| Build-script repair         | Fix a local build break with an obvious cause and constrained file list.                             | Build.                                                                                 | `high`       |
+| Chore                       | What it does                                                                                         | Gate                                                                                   |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Formatter idempotency       | Run the project formatter or make already-formatted files pass formatter check. No behavior changes. | Formatter check or run-twice idempotency through `scripts/run-gate.sh`.                |
+| Unused import/local cleanup | Remove imports, variables, or declarations already reported unused by lint/type/compiler output.     | Lint, typecheck, compiler, or build.                                                   |
+| Simple lint autofix         | Apply safe lint fixes for a named rule and explicit file list.                                       | Lint.                                                                                  |
+| Documentation de-slop       | Tighten repetitive, placeholder, or AI-looking prose in docs without changing technical meaning.     | Markdown/documentation check if present, otherwise build/test/lint gate covering docs. |
+| Local code de-slop          | Simplify obvious duplication or noisy comments inside an explicit file set without behavior changes. | Existing tests plus lint/typecheck/build relevant to those files.                      |
+| Inferable test backfill     | Add a narrow test for behavior already expressed in code or neighboring tests.                       | Targeted test command or full test suite.                                              |
+| Build-script repair         | Fix a local build break with an obvious cause and constrained file list.                             | Build.                                                                                 |
 
 The backlog should usually begin with formatter idempotency. It is cheap, low-risk, and often unlocks cleaner lint/test diffs for later chores.
 
@@ -143,6 +133,8 @@ The backlog should usually begin with formatter idempotency. It is cheap, low-ri
 token-eater is self-contained, but it may use catalog-declared installed skills as prompt sources when they are present. The skill-aware discovery section is authoritative: use `skills-catalog.yaml` plus `scripts/detect-skills.sh` to decide, per archetype, whether the route is `installed`, `hov-dropin-available`, `bundled`, or `missing`.
 
 Do not make optional skills required. Their absence must not block member use (KTD6, R18). When a skill is absent and no bundled route exists, skip that archetype rather than improvising an ungated prompt.
+
+
 
 For catalog-declared deslop and simplify-style chores, always embed this safety constraint in the delegated prompt:
 
@@ -155,7 +147,6 @@ Each admitted chore should be represented in prose or YAML with these fields bef
 ```yaml
 - id: formatter-idempotency-001
   title: Make formatter check pass
-  tier: mechanical
   exec: tool
   fixer_command: "pnpm exec prettier --write src/example.ts README.md"   # explicit dirty files from the check — never a bare glob (see "Prefer the project's own scripts")
   gate:
@@ -182,9 +173,8 @@ Use repo-relative paths. Keep `allowed_files` as small as practical; a chore wit
 2. **Collect candidate files.** Use gate output, formatter/lint output, and local file patterns to identify a small candidate file set. Prefer files already implicated by a failing or checkable gate. If a project-owned script reports the debt, use that same script family for the chore's fixer/gate.
 3. **Create candidates.** Map each signal to one of the bundled chores or an installed skill route, and copy the catalog execution mode (`tool` or `model`) onto the backlog item. If the catalog has no `exec`, use `model`.
 4. **Apply the eligibility rule.** Drop any candidate without a deterministic gate, explicit allowed files, or clear success criterion (R5).
-5. **Tier admitted chores.** Use the tier table above. When uncertain between two tiers, choose the higher tier or exclude the chore.
-6. **Order the backlog.** Mechanical first, then standard, then high. Within a tier, prefer smaller file sets and faster gates.
-7. **Pass to routing.** The harvest loop picks providers by adapter tier, cost rank, and posture; discovery does not pick providers directly (R6).
+5. **Order the backlog.** Deterministic tool chores first (safest and free), then judgment chores from smaller file sets and faster gates to larger. Chores that require more model judgment and touch more files go last.
+6. **Hand the backlog to the run loop.** The loop spends the service you chose on each model chore in order; discovery does not pick providers.
 
 ## Gate examples
 
@@ -222,4 +212,4 @@ For every admitted or excluded candidate, keep one plain-language sentence for `
 - Admitted: "Formatted two TypeScript files because the formatter can verify the result."
 - Excluded: "Skipped dependency updates because this project has no test or build gate to verify them."
 
-This preserves R20 without asking members to understand the adapter mechanics.
+This keeps the summary readable without asking members to understand the delegation mechanics.

@@ -3,3 +3,5 @@
 .token-eater.local.yaml
 scratch/
 .DS_Store
+.claude/worktrees/
+.token-eater/
