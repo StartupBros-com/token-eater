@@ -9,6 +9,10 @@
 # ran and exits 0 on PASS, non-zero on FAIL or when no gate can be found.
 set -euo pipefail
 
+# --list <dir>: print the ordered gate candidates (strongest first) and exit. Used by the ladder.
+LIST=0
+if [ "${1:-}" = "--list" ]; then LIST=1; shift; fi
+
 TARGET="${1:-.}"
 if [ "$#" -gt 0 ]; then
   shift
@@ -48,27 +52,29 @@ first_existing() {
 detect_node_gate() {
   [ -f package.json ] || return 1
 
-  # Prefer specific/cheap checks, then correctness gates; demote bare `lint` BELOW them.
-  # `lint` is a style gate and is frequently mis- or un-configured (e.g. an `eslint` script
-  # with no config in the project) — a broken lint script must never mask a working
-  # test/typecheck/build gate that actually verifies the chore preserved behavior.
-  if has_package_script format:check; then echo "pnpm format:check"; return 0; fi
-  if has_package_script check:format; then echo "pnpm check:format"; return 0; fi
-  if has_package_script typecheck; then echo "pnpm typecheck"; return 0; fi
-  if has_package_script test; then echo "pnpm test"; return 0; fi
-  if has_package_script build; then echo "pnpm build"; return 0; fi
-  if has_package_script lint; then echo "pnpm lint"; return 0; fi
+  # Emit candidate gates in STRENGTH order (strongest first). The ladder (run-session.sh) tries them
+  # in order and uses the strongest one that is green; `detect_gate` (single) returns the first.
+  #
+  # Strongest = a behavior-proving gate: `typecheck && test` together (Tier A). Then individual
+  # correctness checks (Tier B). `lint`/`format` are style gates, demoted BELOW correctness — a broken
+  # or unconfigured lint script must never mask a working test/typecheck/build gate.
+  if has_package_script typecheck && has_package_script test; then echo "pnpm typecheck && pnpm test"; fi
+  if has_package_script typecheck; then echo "pnpm typecheck"; fi
+  if has_package_script test; then echo "pnpm test"; fi
+  if has_package_script build; then echo "pnpm build"; fi
+  if has_package_script format:check; then echo "pnpm format:check"; fi
+  if has_package_script check:format; then echo "pnpm check:format"; fi
+  if has_package_script lint; then echo "pnpm lint"; fi
 
-  if [ -f biome.json ] && has_cmd pnpm; then echo "pnpm exec biome check ."; return 0; fi
+  if [ -f tsconfig.json ] && has_cmd pnpm; then echo "pnpm exec tsc --noEmit"; fi
+  if [ -f biome.json ] && has_cmd pnpm; then echo "pnpm exec biome check ."; fi
   if first_existing eslint.config.js eslint.config.mjs eslint.config.cjs .eslintrc .eslintrc.js .eslintrc.cjs .eslintrc.json >/dev/null && has_cmd pnpm; then
-    echo "pnpm exec eslint ."; return 0
+    echo "pnpm exec eslint ."
   fi
-  if [ -f tsconfig.json ] && has_cmd pnpm; then echo "pnpm exec tsc --noEmit"; return 0; fi
   if first_existing .prettierrc .prettierrc.json .prettierrc.yml .prettierrc.yaml .prettierrc.js prettier.config.js prettier.config.cjs >/dev/null && has_cmd pnpm; then
-    echo "pnpm exec prettier --check ."; return 0
+    echo "pnpm exec prettier --check ."
   fi
-
-  return 1
+  return 0
 }
 
 detect_make_gate() {
@@ -117,13 +123,19 @@ detect_formatter_gate() {
   return 1
 }
 
+# Emit ALL candidate gates, strongest first, across ecosystems (for the ladder / --list).
+gate_candidates() {
+  detect_node_gate 2>/dev/null || true
+  detect_make_gate 2>/dev/null || true
+  detect_python_gate 2>/dev/null || true
+  detect_rust_gate 2>/dev/null || true
+  detect_go_gate 2>/dev/null || true
+  detect_formatter_gate 2>/dev/null || true
+}
+
 detect_gate() {
-  detect_node_gate && return 0
-  detect_make_gate && return 0
-  detect_python_gate && return 0
-  detect_rust_gate && return 0
-  detect_go_gate && return 0
-  detect_formatter_gate && return 0
+  local first; first="$(gate_candidates | grep -v '^[[:space:]]*$' | head -1)"
+  [ -n "$first" ] && { printf '%s\n' "$first"; return 0; }
   return 1
 }
 
@@ -138,6 +150,11 @@ run_gate() {
 }
 
 cd "$TARGET"
+
+if [ "$LIST" = 1 ]; then
+  gate_candidates | grep -v '^[[:space:]]*$'
+  exit 0
+fi
 
 if [ "$#" -gt 0 ]; then
   GATE="$*"

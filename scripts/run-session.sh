@@ -30,6 +30,30 @@ SERVICE=grok; ROUNDS=2; SLUG=session; MAXTURNS=150; DRYRUN=0; PACE=thorough
 REPO=""; SKILL=""; GATE=""; TARGET=""
 
 die() { echo "token-eater: $*" >&2; exit 2; }
+has_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+# Install the project's deps INTO the worktree before the gate. A fresh git worktree has the source
+# but not the per-package node_modules a pnpm/yarn WORKSPACE needs (e.g. better-sqlite3 under
+# apps/cockpit), and non-Node stacks need their own fetch. Best-effort + offline-friendly: never fail
+# the run here - if install can't complete, the gate ladder simply falls to a check that does work.
+ensure_deps() {
+  local wt="$1"
+  ( cd "$wt" 2>/dev/null || exit 0
+    if   [ -f pnpm-lock.yaml ]   && has_cmd pnpm; then pnpm install --frozen-lockfile --prefer-offline >/dev/null 2>&1 || pnpm install --prefer-offline >/dev/null 2>&1 || true
+    elif [ -f package-lock.json ] && has_cmd npm;  then npm ci >/dev/null 2>&1 || npm install >/dev/null 2>&1 || true
+    elif [ -f yarn.lock ]        && has_cmd yarn; then yarn install --frozen-lockfile >/dev/null 2>&1 || yarn install >/dev/null 2>&1 || true
+    elif [ -f bun.lockb ]        && has_cmd bun;  then bun install >/dev/null 2>&1 || true
+    elif [ -f package.json ]     && has_cmd pnpm; then pnpm install --prefer-offline >/dev/null 2>&1 || true
+    fi
+    if   [ -f uv.lock ]     && has_cmd uv;     then uv sync >/dev/null 2>&1 || true
+    elif [ -f poetry.lock ] && has_cmd poetry; then poetry install >/dev/null 2>&1 || true
+    fi
+    { [ -f Cargo.toml ]    && has_cmd cargo;  } && { cargo fetch >/dev/null 2>&1 || true; }
+    { [ -f go.mod ]        && has_cmd go;     } && { go mod download >/dev/null 2>&1 || true; }
+    { [ -f Gemfile.lock ]  && has_cmd bundle; } && { bundle install >/dev/null 2>&1 || true; }
+  )
+  return 0
+}
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --repo) REPO="$2"; shift 2;;
@@ -45,7 +69,7 @@ while [ "$#" -gt 0 ]; do
     *) die "unknown arg: $1";;
   esac
 done
-[ -n "$REPO" ] && [ -n "$SKILL" ] && [ -n "$GATE" ] || die "need --repo --skill --gate (--target is an OPTIONAL hint; omit it to let the skill discover its own target on the service's credits)"
+[ -n "$REPO" ] && [ -n "$SKILL" ] || die "need --repo --skill (--gate is OPTIONAL - omit it to auto-detect the strongest green check; --target is an OPTIONAL hint - omit it to let the skill find its own target)"
 # Target selection belongs on the service, not here: most maintenance skills (de-monolithize's
 # census, dead-code's gate scan, etc.) find their own targets via subagents. Pass --target only as
 # a hint; with none, tell the skill to find the worst offenders itself.
@@ -81,7 +105,7 @@ echo "== token-eater session =="
 echo "  repo:    $ORIGIN_SLUG"
 echo "  service: $SERVICE   skill: $SKILL   rounds: $ROUNDS"
 echo "  target:  ${TARGET:-<skill discovers its own target on $SERVICE>}"
-echo "  gate:    $GATE"
+echo "  gate:    ${GATE:-<auto-detect strongest green check>}"
 
 # 1. AUTH PREFLIGHT - never let an expired token hang the run
 echo "-- auth preflight --"
@@ -99,14 +123,40 @@ BRANCH="$(git -C "$WORKTREE" rev-parse --abbrev-ref HEAD)"
 echo "  worktree: $WORKTREE"
 echo "  branch:   $BRANCH (off origin/$BASE)"
 
-# 3. BASELINE GATE - a gate that is red before we start can't prove anything
-echo "-- baseline gate (must be green) --"
-if bash "$HERE/run-gate.sh" "$WORKTREE" "$GATE" > "$LOG/baseline.log" 2>&1; then
-  echo "  baseline: GREEN"
+# 2b. ENSURE DEPS - install the project's dependencies into the worktree so the gate can run
+echo "-- ensuring project deps in the worktree (best-effort) --"
+ensure_deps "$WORKTREE"
+
+# 3. BASELINE GATE - the STRONGEST deterministic check that is GREEN before we start (a red gate can't
+#    prove anything). Explicit --gate is honored as-is. Otherwise climb the ladder: try the detected
+#    candidates strongest-first, staying within the strongest ecosystem, and adopt the first GREEN one
+#    (Tier A = test+typecheck, Tier B = typecheck/build/lint). If none is green, fall to the soft tier.
+echo "-- baseline gate (strongest green check) --"
+GATE_TIER=""
+if [ -n "$GATE" ]; then
+  if bash "$HERE/run-gate.sh" "$WORKTREE" "$GATE" > "$LOG/baseline.log" 2>&1; then
+    echo "  baseline: GREEN ($GATE)"; GATE_TIER=explicit
+  else
+    echo "  baseline: RED - refusing to run (see $LOG/baseline.log)"; tail -5 "$LOG/baseline.log"
+    bash "$HERE/wt.sh" cleanup "$REPO" "$WORKTREE" drop >/dev/null 2>&1 || true
+    exit 3
+  fi
 else
-  echo "  baseline: RED - refusing to run (see $LOG/baseline.log)"; tail -5 "$LOG/baseline.log"
-  bash "$HERE/wt.sh" cleanup "$REPO" "$WORKTREE" drop >/dev/null 2>&1 || true
-  exit 3
+  _CANDS=(); while IFS= read -r _line; do [ -n "$_line" ] && _CANDS+=("$_line"); done < <(bash "$HERE/run-gate.sh" --list "$WORKTREE" 2>/dev/null || true)
+  _eco=""; [ "${#_CANDS[@]}" -gt 0 ] && _eco="$(printf '%s' "${_CANDS[0]}" | awk '{print $1}')"
+  for cand in "${_CANDS[@]}"; do
+    [ "$(printf '%s' "$cand" | awk '{print $1}')" = "$_eco" ] || continue   # stay in the strongest ecosystem
+    echo "  trying: $cand"
+    if bash "$HERE/run-gate.sh" "$WORKTREE" "$cand" > "$LOG/baseline.log" 2>&1; then
+      GATE="$cand"; GATE_TIER=detected; echo "  baseline: GREEN ($GATE)"; break
+    fi
+  done
+  if [ -z "$GATE_TIER" ]; then
+    # No green deterministic gate. (Step 2 converts this into a Tier-C soft AI-review run.)
+    echo "  baseline: no green deterministic gate found - refusing for now (soft tier lands next)."
+    bash "$HERE/wt.sh" cleanup "$REPO" "$WORKTREE" drop >/dev/null 2>&1 || true
+    exit 3
+  fi
 fi
 
 # 3b. DISCOVER the REAL /ce-code-review persona roster for the review fleet.
