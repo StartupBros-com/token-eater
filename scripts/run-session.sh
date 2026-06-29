@@ -118,14 +118,16 @@ PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
 3. Commit on the CURRENT branch (never \`$BASE\`):
        git add -A && git commit -m "<concise message>"
 
-4. REVIEW your committed diff using the project's OWN review skill: run \`/ce-code-review\`.
-   This is the real review stage - it dispatches specialized reviewer subagents and applies
-   safe, verified fixes, committing them on THIS branch (it never pushes). Use it; do not
-   hand-roll a review when this skill is available.
-   FALLBACK - only if \`/ce-code-review\` is not installed here, errors out, or its reviewer
-   subagents fail to register: do an inline lens review across correctness, tests,
-   maintainability, and security/safety - optionally via \`general-purpose\` subagents (the only
-   subagent type reliably registered here) - and apply the must-fix (P0/P1) findings yourself.
+4. REVIEW your committed diff using the project's OWN review skill: run \`/ce-code-review\` and
+   follow its method. The review MUST be a real FLEET of parallel subagents, not a single inline
+   pass. IMPORTANT - your Task tool only registers these subagent types: \`generalPurpose\`,
+   \`code-reviewer\`, \`best-of-n-runner\`, \`cursor-guide\`. The skill names compound-engineering
+   \`ce-*\` persona types (e.g. ce-correctness-reviewer) that are NOT registered here - dispatching
+   them fails with "unknown variant". Do NOT retry \`ce-*\`. Instead run the fleet with the types
+   you DO have: dispatch one \`code-reviewer\` subagent over the full diff, AND one \`generalPurpose\`
+   subagent PER LENS - correctness, tests, maintainability, security/safety - each given the
+   relevant \`/ce-code-review\` lens instructions. Run them in parallel. Collect every finding as
+   must-fix (P0/P1) or nit (P2/P3).
 
 5. Re-run the gate (\`$GATE\`) - it MUST stay green after any review fixes; commit any fix the
    review skill did not already commit. If P0/P1 issues remain, fix, re-gate, and review again.
