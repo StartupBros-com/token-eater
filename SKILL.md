@@ -44,7 +44,7 @@ A token-eater run is **one session**: one service, one skill, one polished draft
 
 1. **Detect + resolve the service.** Run `scripts/detect-adapters.sh`. If none of the CLIs are installed, stop with a plain explanation. Resolve the service from `$ARGUMENTS` -> saved config -> one-question setup. Confirm it's headless-ready: `scripts/check-auth.sh <service>` (`run-session.sh` does this too).
 
-2. **Find the gate.** The project's own deterministic check is what makes this safe. Run `scripts/run-gate.sh <project>` to auto-detect it (tests / typecheck / build / lint / formatter), or use a known one. **If no gate exists, stop** and say so — token-eater only does work a machine can verify. (`run-session.sh` re-confirms the gate is GREEN at baseline before anything runs.)
+2. **The gate is auto-detected — you don't need to pick it.** `run-session.sh` installs the project's deps into the worktree, then climbs a ladder (strongest green check first): **Tier A** `typecheck && test` → **Tier B** `typecheck`/`build`/`lint` → **Tier C (soft)** no deterministic gate, in which case it still runs but relies on the AI review + a clearly-flagged draft PR. So just **omit `--gate`** and let the engine choose; pass `--gate "<cmd>"` only to override. (Less-technical users with no tests still get a useful run, plainly labeled lower-confidence.)
 
 3. **Offer the menu, let the user pick.** Present the token-heavy skills that are installed and applicable here (see `skills-catalog.yaml` + `scripts/detect-skills.sh`), each with a one-line description. Let the user pick one (or honor the skill argument). See `references/session-run.md` for the menu and how to choose a **target** per skill.
 
@@ -54,14 +54,13 @@ A token-eater run is **one session**: one service, one skill, one polished draft
 
    ```bash
    bash <skill-dir>/scripts/run-session.sh \
-     --repo <project-path> --service <service> \
-     --skill <skill-name> --gate "<gate command>" \
-     --rounds 2 [--pace gentle|thorough] [--target "<optional scope hint>"]
+     --repo <project-path> --service <service> --skill <skill-name> \
+     --rounds 2 [--gate "<override>"] [--pace gentle|thorough] [--target "<optional scope hint>"]
    ```
 
-   Add `--dry-run` to render the recipe and stop. The service then runs the whole loop (skill -> gate -> review + fix via `/ce-code-review`, up to `--rounds` rounds -> push -> draft PR) on its own credits. This is the long-running part.
+   `--gate` is optional (auto-detected — see step 2). Add `--dry-run` to render the recipe and stop. The service then runs the whole loop (skill -> gate -> review + fix, up to `--rounds` rounds -> push -> draft PR) on its own credits — the review uses the real `/ce-code-review` on the `claude` service and the genuine-persona fleet on `grok`/`codex`. This is the long-running part.
 
-6. **Report.** Relay what `run-session.sh` returns: the draft PR URL and the independently-verified gate result, or a clean failure (gate red -> no PR, worktree kept for inspection). The service already ran `/ce-code-review` over its own diff as a self-review pass. **Tell the user to run their own independent review before merging — a fresh `/ce-code-review` in their Claude session (a different model than wrote the diff) plus their frontier-model review** — the service reviewing its own work is only a best-effort polish; the real independent review is theirs. token-eater did not merge anything.
+6. **Report — in plain language.** Translate the engine's output for the user, scaled to how technical they are. Always state, simply: what was cleaned up, that it's a **draft PR** (nothing merged), and the **confidence tier** — "✅ your tests pass" (Tier A), "✅ structural checks pass" (Tier B), or "⚠️ this project has no automated tests, so this was AI-reviewed only — please read it before merging" (Tier C). Include the spend line if present, and end with the one-line risk summary (tier + files touched). Then: **for your own peace of mind, run a fresh `/ce-code-review` (or your frontier-model review) on the PR before merging** — the service reviewed its own work, so an independent pass is still worth it. token-eater did not merge anything. On a clean failure (gate red on an explicit gate, or no PR), say so plainly; the worktree is kept and the user's checkout was never touched.
 
 ## Safety invariants
 

@@ -375,6 +375,14 @@ if [ "$GATE_TIER" = soft ]; then
 $_body" >/dev/null 2>&1 || true
 fi
 
+# Best-effort spend line - the whole point is burning credits, so surface what this run cost.
+# claude/codex delegates emit .cost_usd; grok has no per-run cost in its envelope (skip, not error).
+SPEND_LINE=""
+if has_cmd jq; then
+  _cost="$(jq -r '(.cost_usd // .total_cost_usd // empty)' "$LOG/service-out.json" 2>/dev/null || true)"
+  case "$_cost" in ''|0|0.0|null) ;; *) SPEND_LINE="  spent:    \$$_cost ($SERVICE, this run)";; esac
+fi
+
 # verify it is actually a draft
 IS_DRAFT="$(gh pr view "$PR_URL" --repo "$ORIGIN_SLUG" --json isDraft --jq '.isDraft' 2>/dev/null || echo unknown)"
 echo
@@ -385,5 +393,6 @@ if [ "$GATE_TIER" = soft ]; then
 else
   echo "  gate:     GREEN ($COMMITS commit/s, $GATE_TIER: $GATE)"
 fi
+[ -n "$SPEND_LINE" ] && echo "$SPEND_LINE"
 echo "  review:   run /ce-code-review + your frontier-model review on the PR before merging."
 echo "  worktree: $WORKTREE (remove with: bash $HERE/wt.sh cleanup $REPO $WORKTREE keep)"
