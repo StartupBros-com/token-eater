@@ -135,7 +135,7 @@ if [ -n "$CE_AGENTS_DIR" ] && [ -f "$CE_AGENTS_DIR/ce-correctness-reviewer.md" ]
     [ -f "$CE_AGENTS_DIR/$p.md" ] || continue
     n=$((n+1))
     PERSONA_DISPATCHES="$PERSONA_DISPATCHES
-     ${n}. general-purpose subagent, prompt VERBATIM: \"Use the Read tool to read $CE_AGENTS_DIR/$p.md and adopt that reviewer persona exactly (do not proceed until you have actually read the file). Then, as that persona, review the diff from: git diff origin/$BASE..HEAD . Report findings as P0/P1 (must-fix) or P2/P3 (nits) with file:line.\""
+     ${n}. general-purpose subagent, prompt VERBATIM: \"Use the Read tool to read $CE_AGENTS_DIR/$p.md and adopt that reviewer persona exactly (do not proceed until you have actually read the file). Then, as that persona, review the diff from: git diff origin/$BASE..HEAD . Report findings as P0/P1 (must-fix) or P2/P3 (nits) with file:line. The FIRST line of your reply MUST be exactly: 'PERSONA-MARK: $p :: ' followed by a verbatim sentence of 10+ words copied from $p.md - this proves you actually read the file.\""
   done
   REVIEW_INSTRUCTIONS="REVIEW your committed diff (from: git diff origin/$BASE..HEAD) by running /ce-code-review's
    genuine reviewer personas as a real subagent FLEET. grok's \`ce-*\` subagent_type dispatch is unreliable, so
@@ -149,7 +149,10 @@ if [ -n "$CE_AGENTS_DIR" ] && [ -f "$CE_AGENTS_DIR/ce-correctness-reviewer.md" ]
    when the PR already has prior review comments). Skip the cross-model codex-reviewer (needs the Codex CLI).
    CONCURRENCY + RATE LIMITS: dispatch subagents $CONC_SHORT; on a 429 back off and RETRY (per the rate-limit
    rule). EVERY dispatched subagent MUST complete AND must have Read its persona file - a review whose subagents
-   did not Read ${CE_AGENTS_DIR}/ce-*.md is INVALID. Aggregate all findings, then fix every P0/P1."
+   did not Read ${CE_AGENTS_DIR}/ce-*.md is INVALID. Aggregate all findings, then fix every P0/P1. Your FINAL
+   summary MUST include a section titled 'PERSONA ROLL-CALL' listing - verbatim - every 'PERSONA-MARK: ...'
+   line returned by your subagents (one per dispatched persona). This roll-call is how the run is verified:
+   do not omit it, do not paraphrase it, and never fabricate a mark you did not receive from a subagent."
 else
   REVIEW_INSTRUCTIONS="REVIEW your committed diff (\`git diff origin/$BASE..HEAD\`) by running
    /ce-code-review's method as a FLEET of \`general-purpose\` subagents (always available) - one per lens:
