@@ -36,7 +36,17 @@ while [ "$#" -gt 0 ]; do
     *) die "unknown arg: $1";;
   esac
 done
-[ -n "$REPO" ] && [ -n "$SKILL" ] && [ -n "$GATE" ] && [ -n "$TARGET" ] || die "need --repo --skill --gate --target"
+[ -n "$REPO" ] && [ -n "$SKILL" ] && [ -n "$GATE" ] || die "need --repo --skill --gate (--target is an OPTIONAL hint; omit it to let the skill discover its own target on the service's credits)"
+# Target selection belongs on the service, not here: most maintenance skills (de-monolithize's
+# census, dead-code's gate scan, etc.) find their own targets via subagents. Pass --target only as
+# a hint; with none, tell the skill to find the worst offenders itself.
+if [ -n "$TARGET" ]; then
+  GOAL_LINE="$TARGET"
+  HINT="A starting hint (the skill's own analysis WINS if it disagrees): $TARGET"
+else
+  GOAL_LINE="Find and fix the best target(s) the /$SKILL skill identifies in this repository — let the skill's own analysis choose what and how much to touch."
+  HINT="No target was pre-chosen — the skill must identify the target itself via its own analysis/census"
+fi
 [ -d "$REPO/.git" ] || die "not a git repo: $REPO"
 command -v "$SERVICE" >/dev/null 2>&1 || die "service CLI not found: $SERVICE"
 
@@ -49,7 +59,7 @@ LOG="$RESULT_DIR/$RUNID"; mkdir -p "$LOG"
 echo "== token-eater session =="
 echo "  repo:    $ORIGIN_SLUG"
 echo "  service: $SERVICE   skill: $SKILL   rounds: $ROUNDS"
-echo "  target:  $TARGET"
+echo "  target:  ${TARGET:-<skill discovers its own target on $SERVICE>}"
 echo "  gate:    $GATE"
 
 # 1. AUTH PREFLIGHT - never let an expired token hang the run
@@ -84,7 +94,7 @@ cat > "$RECIPE" <<EOF
 You are token-eater's autonomous worker for ONE session. You are inside a fresh git worktree of
 the $ORIGIN_SLUG repository, on branch \`$BRANCH\` (based on origin/$BASE). Do ALL work here.
 
-GOAL: $TARGET
+GOAL: $GOAL_LINE
 Use the \`/$SKILL\` skill as your method.
 
 THE GATE (authoritative - it must pass at every commit):
@@ -94,8 +104,12 @@ trust your own judgment over the gate.
 
 PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
 
-1. Run \`/$SKILL\` to accomplish the goal. Preserve all behavior, the public API surface, types,
-   tests, validation, error handling, and security/auth. Never weaken or delete a test.
+1. Run \`/$SKILL\`. Let the skill's OWN analysis pick the target(s): most maintenance skills scan
+   the repo themselves to find their work - e.g. de-monolithize runs a census that RANKS monoliths
+   and skips generated / justified-cohesive files; dead-code uses the gate's unused-symbol output.
+   Spend real effort here (parallel \`general-purpose\` subagents are encouraged) - choosing the right
+   target IS part of the job. Do NOT fixate on one pre-chosen file. $HINT. Preserve all behavior, the public API
+   surface, types, tests, validation, error handling, and security/auth. Never weaken or delete a test.
 
 2. Run the gate (\`$GATE\`). It MUST pass. If it fails, fix until green. If you genuinely cannot,
    run \`git reset --hard\` to restore a clean state and STOP with a clear explanation - never open

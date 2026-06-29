@@ -24,14 +24,13 @@ Skills that have **no machine gate** (pure prose de-slop with no docs check, per
 
 The gate is what makes an unattended run safe — it must be a deterministic check that is **green before the session starts** (`run-session.sh` enforces this baseline). Find it with `scripts/run-gate.sh <project>` (auto-detects format:check → typecheck → test → build → lint) or set it explicitly. For behavior-preserving skills (de-monolithize, simplify, dead-code), prefer a gate that actually proves behavior is unchanged: **`<test command> && <typecheck command>`** (e.g. `pnpm exec tsc --noEmit && pnpm test`). If the repo has no gate at all, **stop** — token-eater does not run skills it cannot verify.
 
-## Pick the target
+## Target: let the skill choose it (on the service's credits)
 
-Give the skill one short, plain-language focus (it becomes the recipe's `GOAL`). Examples:
-- de-monolithize → "Split `src/services/renpho-api.ts` (the largest module) into cohesive files without changing behavior."
-- de-slop → "Tighten the repetitive prose in `README.md` and `docs/` without changing technical meaning."
-- dead-code → "Remove the unused exports the typecheck/lint gate reports."
+Do **not** pre-pick the target with a crude heuristic. These maintenance skills find their own work, and they do it better — on the service's credits, which is exactly what we want to burn:
+- **de-monolithize** runs a full census (`scripts/census.sh` + parallel `monolith-census-mapper` subagents per directory) that ranks files by size×complexity×churn, tags pathology buckets, and **skips generated files and justified-cohesive monoliths**. Its docs even warn that a file you hand-pick "may not be the worst offender."
+- **dead-code** keys off the gate's own unused-symbol output; **mock-removal** scans for dead mocks; **de-slop** finds the sloppiest prose.
 
-Keep the target scoped and concrete; the skill itself handles the how.
+Choosing the right target is itself token-heavy analysis — that's a feature, not overhead. So leave `--target` off and let the skill discover it (the recipe tells the skill to spend real effort here, parallel `general-purpose` subagents encouraged). Pass `--target` **only** as an optional scope hint when you want to steer it (e.g. `--target "focus on the API layer if it's the worst"`); the recipe passes it as a hint the skill's own analysis can override.
 
 ## Launch
 
@@ -39,7 +38,7 @@ Keep the target scoped and concrete; the skill itself handles the how.
 bash <skill-dir>/scripts/run-session.sh \
   --repo <project-path> --service <service> \
   --skill <skill-name> --gate "<gate command>" \
-  --target "<plain-language target>" --rounds 2 --slug <short-slug>
+  --rounds 2 --slug <short-slug> [--target "<optional scope hint>"]
 ```
 
 `run-session.sh` does, in order: auth preflight → `git fetch` + worktree off fresh `origin/main` → **baseline gate (must be green)** → render the recipe → **launch the service** (it runs the whole skill→gate→self-review→draft-PR loop on its own credits) → **independently re-run the gate** → ensure a **draft** PR exists on `origin`. Add `--dry-run` to render the recipe and stop (no launch, no spend).

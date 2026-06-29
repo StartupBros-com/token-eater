@@ -48,7 +48,7 @@ A token-eater run is **one session**: one service, one skill, one polished draft
 
 3. **Offer the menu, let the user pick.** Present the token-heavy skills that are installed and applicable here (see `skills-catalog.yaml` + `scripts/detect-skills.sh`), each with a one-line description. Let the user pick one (or honor the skill argument). See `references/session-run.md` for the menu and how to choose a **target** per skill.
 
-4. **Determine the target.** Each skill needs a concrete focus — e.g. de-monolithize -> the largest source file; de-slop -> docs/comments; simplify -> a chosen module; dead-code -> what the type/lint gate flags. Keep it a short plain-language instruction.
+4. **Let the skill find its own target — on the service's credits.** Do NOT pre-pick a target with a crude heuristic (e.g. "the largest file"): that wastes *your* tokens and overrides the skill's better, service-run analysis. Most of these skills discover their own work — de-monolithize runs a census that ranks monoliths and skips generated / justified-cohesive files; dead-code keys off the gate's unused-symbol output. Choosing the right target is itself token-heavy analysis that belongs on the service. So pass `--target` only as an optional **scope hint** (e.g. "focus on the API layer") — or omit it entirely and let the skill choose.
 
 5. **Launch the session.** Call the engine — it does preflight (worktree off fresh `origin/main` + baseline gate), hands the service the recipe, then independently re-verifies the gate and ensures a draft PR:
 
@@ -56,7 +56,7 @@ A token-eater run is **one session**: one service, one skill, one polished draft
    bash <skill-dir>/scripts/run-session.sh \
      --repo <project-path> --service <service> \
      --skill <skill-name> --gate "<gate command>" \
-     --target "<plain-language target>" --rounds 2
+     --rounds 2 [--target "<optional scope hint>"]
    ```
 
    Add `--dry-run` to render the recipe and stop. The service then runs the whole loop (skill -> gate -> self-review + fix, up to `--rounds` rounds -> push -> draft PR) on its own credits. This is the long-running part.
