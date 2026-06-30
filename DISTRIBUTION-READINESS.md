@@ -24,6 +24,14 @@ macOS). Two threads: make it **safe** for untrusted users, and make it **install
    charset) are rejected if malformed before reaching `gh pr create` or the agent recipe.
 - ✅ **`.env` no longer copied** into the worktree (was exposing secrets to the autonomous service).
 
+## Member-first runtime UX — DONE
+
+- ✅ **`/token-eater` and nothing else.** Members are non-technical and never type a flag. First run on a
+   project asks a short **interactive multiple-choice preflight** (plain language: "what should I do?" +
+   "which credits?"), **persists the answers to `./.token-eater.yaml`**, and every later run is
+   zero-questions. Flags (`--trust-repo`, `--install-deps`, `--gate`, `--pace`) are Claude↔engine only;
+   the member's interactive choice is the trust consent. No jargon skill-menu. (SKILL.md + setup-and-config.md.)
+
 ## Open — DELIVERY (makes it installable by a member)
 
 The HoV app (`~/SITES/prbot/apps/startupbros`) is course/challenge/vault-based with **no skill-install
@@ -34,6 +42,15 @@ mechanism yet**. Needs a design:
   it the review falls back to generic lenses. Either bundle/recommend it, or make the fallback a
   first-class, honestly-labeled experience.
 - Course lesson / vault resource that teaches install + use.
+
+## Open — OBSERVABILITY (members will ask "what did this cost?")
+
+- **Per-run spend is unobservable on grok.** token-eater's whole pitch is "burn your credits," but the
+  grok headless log emits only ONE usage record (the orchestrator turn — e.g. 111k tokens, 99.6%
+  cached); the parallel native subagents (`grok-4.20-multi-agent`) that do the real work log no token
+  usage. So the DONE-block spend line is empty for grok. claude/codex delegates DO report `cost_usd`.
+  Options: query grok's usage API/dashboard for a per-run delta, show wall-clock + subagent count as a
+  proxy, or at minimum tell the member where to see their spend. (Verified on PR #830's run.)
 
 ## Standing rule (added 2026-06-29)
 

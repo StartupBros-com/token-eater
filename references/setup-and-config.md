@@ -1,20 +1,27 @@
 # Setup and config
 
-token-eater needs almost no configuration. The only thing it has to know is **which service's credits you want to spend** — and you can answer that on the command line every time (`/token-eater grok`) and never set up anything. Config just remembers a default so you can type `/token-eater` on its own.
+Config exists so a non-technical member types `/token-eater` and nothing else — **ever**. The first
+run asks a short interactive preflight (plain language), saves the answers, and every run after that
+is zero-questions. Config records only the member's *choices* (which credits, what task) — never
+secrets, postures, tiers, idle windows, or reserve floors (those concepts are gone).
 
-There is no posture, tier, idle window, or reserve-floor setup. Those concepts are gone: you choose the service, and that choice is the whole policy.
+## Interactive preflight (asked once, then persisted)
 
-## One-question setup
+Run the preflight when there is **no readable config** and no relevant `$ARGUMENTS`, or when the
+`setup` token is passed. Use the **AskUserQuestion tool** so the member clicks plain-language choices —
+they never type a flag. Ask only what isn't already known:
 
-Run setup when there is no config and no service was named on the command line, or when the `setup` token is passed.
+1. **"What should I do?"** — plain-language options that map to skills (see SKILL.md's mapping table).
+   Mark the safest/most-broadly-useful *(Recommended)*. → saved as `task`.
+2. **"Which credits should I use?"** — only if more than one service is signed in (else pick the one
+   that is, silently). Plain wording: "Claude / Grok / Codex credits". → saved as `services`.
 
-Ask exactly one question, in plain language:
+Offer only services that `scripts/detect-adapters.sh` reports `available`. **Save the answers to
+`./.token-eater.yaml`** and continue the run. Do not ask about trust as a separate question — the
+member choosing to run is the consent (Claude passes `--trust-repo`; the engine remembers it per repo).
 
-> **Which service's credits should I spend by default?** (Grok / Codex / Claude — you can list more than one, and they'll be spent in that order. You can always override this per run, e.g. `/token-eater codex`.)
-
-Offer only services that `scripts/detect-adapters.sh` reports `available`. Save the answer and continue into the run. Do not ask about schedules, review depth, postures, or reserve floors — those are either gone or live as optional settings a power user can add to the config file by hand (see below).
-
-If a service is named on the command line, skip setup entirely and just use it (optionally offering to save it as the new default).
+If `$ARGUMENTS` already names a service and/or skill (power user), skip the matching question(s); offer
+to save them once.
 
 ## Config locations
 
@@ -35,6 +42,8 @@ Schema version `2` is YAML, intentionally small enough for an agent to read and 
 version: 2
 services: [grok]              # which service(s) to spend by default, in order. The first available,
                               # un-parked service does each model chore; later ones pick up the rest.
+task: simplify-and-refactor-code-isomorphically  # the skill the member chose in the preflight ("what
+                              # should I do?"). Persisted so /token-eater never re-asks. `setup` rewrites it.
 review_before_pr: false       # optional: run one review pass before opening each draft PR
                               # (default off — review the draft PR yourself, e.g. with /ce-code-review)
 stop_when_low: null           # optional/advanced: e.g. "20%" to stop spending a service when onwatch
@@ -48,6 +57,7 @@ Field meanings:
 | ----- | ------- |
 | `version` | Config schema version. Current value: `2`. An unknown version should stop and ask to re-run setup rather than guess. |
 | `services` | Ordered list of service ids from `adapters.yaml` to spend. A service must also be detected before it can be used. A command-line service argument overrides this list for that run. |
+| `task` | The skill chosen in the preflight (plain-language "what should I do?" → skill name). Persisted so the member is never re-asked. Omitted/empty → ask the preflight question. A skill argument overrides it for that run. |
 | `review_before_pr` | When `true`, run the optional pass in `references/review-pipeline.md` before each draft PR. Default `false`. |
 | `stop_when_low` | Optional balance guard, e.g. `"20%"`. Only has effect when onwatch is available (`scripts/onwatch-usage.sh`); otherwise the run simply continues until each service's circuit breaker fires. |
 | `result_dir` | Repo-relative directory for run artifacts and the ledger. Defaults to `.token-eater/runs`. |
@@ -56,12 +66,17 @@ Anything not listed here (old `posture`, `tier`, `idle_window`, `reserve_floor`,
 
 ## Round-trip behavior
 
-Every normal invocation resolves the service before doing work:
+Every normal invocation resolves **service + task** before doing work:
 
-1. If a service is named on the command line, use it (services in `$ARGUMENTS`, in order).
-2. Else if the `setup` token is present, run the one-question setup.
-3. Else if a readable config exists, load it and use its `services`.
-4. Else run the one-question setup.
-5. If config parsing fails, do not guess — report the path and the problem, and offer to re-run setup and replace the file.
+1. If `$ARGUMENTS` names a service and/or skill, use them for this run.
+2. Else if the `setup` token is present, run the interactive preflight (and rewrite the saved file).
+3. Else if a readable config exists, load it; use its `services` and `task`. Any field it's missing,
+   ask just that one preflight question.
+4. Else run the interactive preflight and **persist `{services, task}` to `./.token-eater.yaml`**.
+5. If config parsing fails, do not guess — report the path and the problem, and offer to re-run the
+   preflight and replace the file.
+
+The goal: after the very first run, `/token-eater` on that project asks **nothing** — it reads the
+saved `{services, task}` and the engine's per-repo trust cache and just runs.
 
 After resolving the service, the run loop still runs `scripts/detect-adapters.sh`: config is intent, detection is current capability. A service must be both chosen and currently installed to be spent.
