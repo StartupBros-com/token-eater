@@ -106,8 +106,9 @@ ORIGIN_SLUG="$(git -C "$REPO" remote get-url origin 2>/dev/null | sed -E 's#(git
 # and the agent recipe. Refuse anything but a plain owner/repo slug so a crafted remote can't redirect
 # the authenticated gh push/PR or inject text into the recipe.
 case "$ORIGIN_SLUG" in
-  */*/*|*[!A-Za-z0-9._/-]*|''|/*|*/) die "refusing suspicious origin slug: '$ORIGIN_SLUG' (expected owner/repo)";;
+  -*|*/-*|*/*/*|*[!A-Za-z0-9._/-]*|''|/*|*/) die "refusing suspicious origin slug: '$ORIGIN_SLUG' (expected owner/repo)";;
 esac
+case "$ORIGIN_SLUG" in */*) : ;; *) die "refusing origin slug without owner/repo shape: '$ORIGIN_SLUG'";; esac
 
 # TRUST GATE - token-eater runs THIS repo's own code on your machine (its gate command, e.g. `npm test`,
 # and with --install-deps its dependency install scripts). Never do that for an untrusted repo silently:
