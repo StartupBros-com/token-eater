@@ -25,12 +25,13 @@ command, native versioning/updates, no `curl|bash`.
    stay at root. **Still TODO: a real `/plugin install` (from the git source) → `/token-eater` round-trip
    on a clean machine (ideally the mac)** — structural validation passed; the live install isn't tested
    here to avoid colliding with the dev symlink.
-3. **HoV marketplace repo** — a new git repo `StartupBros-com/hov-marketplace` with
-   `.claude-plugin/marketplace.json`:
-   - lists `token-eater` (source = this repo),
-   - lists `compound-engineering` (source = `EveryInc/compound-engineering-plugin`) as the required
-     companion, so `marketplace add hov` then installing both is one flow.
-   - room to grow into other HoV tools later.
+3. ✅ **HoV marketplace repo** — created at `StartupBros-com/hov-marketplace` (private/WIP until launch),
+   `.claude-plugin/marketplace.json` (name `hov`) lists `token-eater` (source = this repo, pinned to
+   main). **Live-validated:** `claude plugin marketplace add StartupBros-com/hov-marketplace` clones +
+   validates + "Successfully added marketplace: hov". `compound-engineering` is documented in the
+   marketplace README as the required companion (install from `every-marketplace`) + enforced by the
+   SKILL preflight — NOT baked in as a fragile EveryInc source (left as a refinement if a one-add flow
+   is wanted). **Flip the repo to public at launch.** Bump the pinned token-eater sha on each release.
 4. **Dependency enforcement** (plugin manifests have NO hard-dependency field — verified). Two layers:
    - **Member-facing preflight** (SKILL.md): on first run, Claude checks whether the compound-engineering
      personas are available; if not, plain-language "I need the compound-engineering plugin for the code
