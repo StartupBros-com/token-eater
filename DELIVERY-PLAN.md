@@ -15,8 +15,15 @@ command, native versioning/updates, no `curl|bash`.
 
 ## Build steps
 
-1. ✅ **Plugin manifest** — `.claude-plugin/plugin.json` (this PR). Makes token-eater installable as a
-   Claude Code plugin (works today via a direct git source; via the marketplace once step 2 lands).
+1. ✅ **Plugin manifest** — `.claude-plugin/plugin.json` (this PR). Validates clean.
+   ⚠️ **BUT it exposes 0 skills as-is** — `grok plugin validate` reports `0 skill dir(s)`. token-eater's
+   `SKILL.md` lives at the repo **root** (fine for the current symlink install at `~/.claude/skills/
+   token-eater/`), but a Claude Code **plugin** discovers skills under `skills/<name>/SKILL.md`,
+   agents under `agents/`, commands under `commands/`. So **the repo must be restructured** for plugin
+   delivery: move `SKILL.md` + `scripts/` + `references/` under `skills/token-eater/` (the scripts use
+   `$HERE`-relative paths, so moving them together is mechanical, but the current symlink install + any
+   absolute references must be re-pointed). This is the first real build task for delivery and should be
+   validated by an actual `/plugin install` + `/token-eater` round-trip.
 2. **HoV marketplace repo** — a new git repo `StartupBros-com/hov-marketplace` with
    `.claude-plugin/marketplace.json`:
    - lists `token-eater` (source = this repo),
