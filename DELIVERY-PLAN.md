@@ -15,28 +15,29 @@ command, native versioning/updates, no `curl|bash`.
 
 ## Build steps
 
-1. ✅ **Plugin manifest** — `.claude-plugin/plugin.json` (this PR). Validates clean.
-   ⚠️ **BUT it exposes 0 skills as-is** — `grok plugin validate` reports `0 skill dir(s)`. token-eater's
-   `SKILL.md` lives at the repo **root** (fine for the current symlink install at `~/.claude/skills/
-   token-eater/`), but a Claude Code **plugin** discovers skills under `skills/<name>/SKILL.md`,
-   agents under `agents/`, commands under `commands/`. So **the repo must be restructured** for plugin
-   delivery: move `SKILL.md` + `scripts/` + `references/` under `skills/token-eater/` (the scripts use
-   `$HERE`-relative paths, so moving them together is mechanical, but the current symlink install + any
-   absolute references must be re-pointed). This is the first real build task for delivery and should be
-   validated by an actual `/plugin install` + `/token-eater` round-trip.
-2. **HoV marketplace repo** — a new git repo `StartupBros-com/hov-marketplace` with
+1. ✅ **Plugin manifest** — `.claude-plugin/plugin.json`. Validates clean.
+2. ✅ **Plugin skill layout** — `SKILL.md` + `scripts/` + `references/` + `skills-catalog.yaml` +
+   `adapters.yaml` moved under `skills/token-eater/` (history-preserving `git mv`). `grok plugin validate`
+   now reports **`1 skill dir(s)`** (was 0). Path resolution verified at the new location: scripts'
+   `$ROOT` (dir above `scripts/`) still finds `adapters.yaml`/`skills-catalog.yaml`; `detect-adapters`,
+   `detect-skills`, `run-gate --list` all work; `bash -n` clean. The dev symlink
+   `~/.claude/skills/token-eater` was re-pointed to `skills/token-eater/`. Repo-root docs/`.claude-plugin/`
+   stay at root. **Still TODO: a real `/plugin install` (from the git source) → `/token-eater` round-trip
+   on a clean machine (ideally the mac)** — structural validation passed; the live install isn't tested
+   here to avoid colliding with the dev symlink.
+3. **HoV marketplace repo** — a new git repo `StartupBros-com/hov-marketplace` with
    `.claude-plugin/marketplace.json`:
    - lists `token-eater` (source = this repo),
    - lists `compound-engineering` (source = `EveryInc/compound-engineering-plugin`) as the required
      companion, so `marketplace add hov` then installing both is one flow.
    - room to grow into other HoV tools later.
-3. **Dependency enforcement** (plugin manifests have NO hard-dependency field — verified). Two layers:
+4. **Dependency enforcement** (plugin manifests have NO hard-dependency field — verified). Two layers:
    - **Member-facing preflight** (SKILL.md): on first run, Claude checks whether the compound-engineering
      personas are available; if not, plain-language "I need the compound-engineering plugin for the code
      reviewers — install it?" → `/plugin install compound-engineering@hov` → continue.
    - **Engine fallback** (already shipped): if the personas aren't found, `run-session.sh` degrades to
      generic-lens reviewers rather than failing — the safety net.
-4. **HoV course / vault content** in `~/SITES/prbot/apps/startupbros/content/` — a short lesson:
+5. **HoV course / vault content** in `~/SITES/prbot/apps/startupbros/content/` — a short lesson:
    "Put your expiring AI credits to work" → the two install commands + `/token-eater` + how to review
    the draft PR. Plain language, screenshots, no flags.
 
