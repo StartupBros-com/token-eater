@@ -13,19 +13,16 @@ macOS). Two threads: make it **safe** for untrusted users, and make it **install
   pnpm/timeout/flock), verified on a real Mac — the realistic member environment. Fixed: empty-array
   `set -u` aborts, `mapfile`, pnpm-hardcoding, `stat -c`, `timeout`.
 
-## Open — SAFETY (makes it safe to point at untrusted repos)
+## SAFETY (makes it safe to point at untrusted repos) — DONE
 
-A member cannot judge "is this repo trusted?", so the trust note is not enough on its own.
-
-1. **Gate sandbox / allowlist.** The auto-detected gate runs the repo's own code (`bash -lc "$GATE"`,
-   e.g. `npm test` = arbitrary script). Add a real technical control — run gates in a sandbox/container,
-   or restrict auto-detected gates to a known-binary allowlist and refuse arbitrary `package.json`
-   script bodies. (`--install-deps` is already opt-in for the install-script RCE path.)
-2. **Validate repo-derived strings.** `ORIGIN_SLUG` / `BASE` / `BRANCH` come from the target repo and
-   flow into `gh pr create --repo` and the agent recipe. Validate against strict charsets
-   (`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`, git ref rules) before use.
-3. **Stop copying `.env` into the worktree.** `wt.sh` copies the target repo's `.env`/`.env.*` where
-   the autonomous service can read/exfiltrate them. Don't copy secrets by default.
+- ✅ **Trust gate.** token-eater runs the target repo's own code (its gate command; with `--install-deps`,
+   its install scripts). It now **refuses without `--trust-repo`** (explicit, remembered-per-repo consent),
+   so a repo's code never runs silently. `--install-deps` stays opt-in for the install-script RCE path.
+   *(A network sandbox — `sandbox-exec`/`bwrap` — is a stronger future control; the trust gate is the v1
+   because a default sandbox breaks legitimate gates that need fs/network.)*
+- ✅ **Repo-derived strings validated.** `ORIGIN_SLUG` (owner/repo charset), `BASE`, `BRANCH` (git ref
+   charset) are rejected if malformed before reaching `gh pr create` or the agent recipe.
+- ✅ **`.env` no longer copied** into the worktree (was exposing secrets to the autonomous service).
 
 ## Open — DELIVERY (makes it installable by a member)
 

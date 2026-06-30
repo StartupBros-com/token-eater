@@ -55,7 +55,7 @@ A token-eater run is **one session**: one service, one skill, one polished draft
    ```bash
    bash <skill-dir>/scripts/run-session.sh \
      --repo <project-path> --service <service> --skill <skill-name> \
-     --rounds 2 [--gate "<override>"] [--pace gentle|thorough] [--target "<optional scope hint>"]
+     --rounds 2 --trust-repo [--gate "<override>"] [--install-deps] [--pace gentle|thorough] [--target "<hint>"]
    ```
 
    `--gate` is optional (auto-detected — see step 2). Add `--dry-run` to render the recipe and stop. The service then runs the whole loop (skill -> gate -> review + fix, up to `--rounds` rounds -> push -> draft PR) on its own credits — the review uses the real `/ce-code-review` on the `claude` service and the genuine-persona fleet on `grok`/`codex`. This is the long-running part.
@@ -66,7 +66,7 @@ A token-eater run is **one session**: one service, one skill, one polished draft
 
 - Never auto-merge AND never auto-mark-ready — work lands as a **draft PR**; the final review and merge are always yours.
 - **Prefer a deterministic gate; degrade transparently when there isn't one.** Tier A/B run the project's real check and the result is re-verified independently. Tier C (no gate) still runs but is clearly flagged on the PR as AI-reviewed-only — never presented as machine-verified.
-- **Trust boundary:** token-eater runs *the target repo's own code* on your machine — its gate command (e.g. `pnpm test`), and, with `--install-deps`, its dependency install/lifecycle scripts. Point it only at repos you trust. Dependency install is OFF by default for this reason.
+- **Trust boundary (enforced):** token-eater runs *the target repo's own code* on your machine — its gate command (e.g. `pnpm test`), and, with `--install-deps`, its dependency install/lifecycle scripts. So it **refuses to run a repo's code without `--trust-repo`** (remembered per repo after the first time). Dependency install is additionally OFF by default. Repo-derived strings (`origin` slug, base/branch) are validated before reaching `gh`/the recipe, and the target repo's `.env` is never copied into the worktree.
 - token-eater's gate is re-run **independently** after the service finishes — the service's self-report is never trusted for keep/ship.
 - token-eater only spends the service you named (or your saved default).
 - All work happens in a fresh worktree branched from `origin/main`; your checkout and uncommitted work are never touched. A red final gate means no PR.
