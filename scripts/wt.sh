@@ -56,12 +56,10 @@ cmd_create() {
     || die "worktree add failed (branch $branch may already exist)"
 
   # --- set the worktree up to actually run the gate (ce-worktree + the deps fix) ---
-  # 1. env files
-  for f in "$repo"/.env "$repo"/.env.*; do
-    [ -e "$f" ] || continue
-    case "$(basename "$f")" in *.example) continue ;; esac
-    cp -p "$f" "$wt/" 2>/dev/null || true
-  done
+  # 1. env files: INTENTIONALLY NOT copied. The autonomous service (and the repo's own gate/install
+  #    scripts) run in this worktree; copying real .env/.env.* secrets here would expose DB creds / API
+  #    keys to a third-party coding service and risk them landing in commits/PRs/telemetry. A gate that
+  #    genuinely needs env is a future opt-in (cf. --install-deps), not a silent default.
   # 2. dependencies (symlink, so the gate's tsc/vitest/pytest resolve) + exclude from change detection
   local exclude; exclude="$(git -C "$wt" rev-parse --git-path info/exclude)"
   for dep in node_modules .venv venv; do

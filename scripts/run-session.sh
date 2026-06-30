@@ -26,7 +26,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SERVICE=grok; ROUNDS=2; SLUG=session; MAXTURNS=150; DRYRUN=0; PACE=thorough; INSTALL_DEPS=0
+SERVICE=grok; ROUNDS=2; SLUG=session; MAXTURNS=150; DRYRUN=0; PACE=thorough; INSTALL_DEPS=0; TRUST_REPO=0
 REPO=""; SKILL=""; GATE=""; TARGET=""
 
 die() { echo "token-eater: $*" >&2; exit 2; }
@@ -70,6 +70,7 @@ while [ "$#" -gt 0 ]; do
     --max-turns) MAXTURNS="$2"; shift 2;;
     --pace) PACE="$2"; shift 2;;
     --install-deps) INSTALL_DEPS=1; shift;;
+    --trust-repo) TRUST_REPO=1; shift;;
     --dry-run) DRYRUN=1; shift;;
     *) die "unknown arg: $1";;
   esac
@@ -101,6 +102,24 @@ command -v "$SERVICE" >/dev/null 2>&1 || die "service CLI not found: $SERVICE"
 
 REPO="$(cd "$REPO" && pwd)"
 ORIGIN_SLUG="$(git -C "$REPO" remote get-url origin 2>/dev/null | sed -E 's#(git@[^:]+:|https?://[^/]+/)##; s#\.git$##')" || die "no origin remote"
+# Validate: ORIGIN_SLUG is repo-controlled (from its origin URL) and flows into `gh pr create --repo`
+# and the agent recipe. Refuse anything but a plain owner/repo slug so a crafted remote can't redirect
+# the authenticated gh push/PR or inject text into the recipe.
+case "$ORIGIN_SLUG" in
+  -*|*/-*|*/*/*|*[!A-Za-z0-9._/-]*|''|/*|*/) die "refusing suspicious origin slug: '$ORIGIN_SLUG' (expected owner/repo)";;
+esac
+case "$ORIGIN_SLUG" in */*) : ;; *) die "refusing origin slug without owner/repo shape: '$ORIGIN_SLUG'";; esac
+
+# TRUST GATE - token-eater runs THIS repo's own code on your machine (its gate command, e.g. `npm test`,
+# and with --install-deps its dependency install scripts). Never do that for an untrusted repo silently:
+# require explicit, remembered consent. First run on a repo needs --trust-repo; it's cached thereafter.
+TRUST_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/token-eater/trusted-repos"
+if [ "$TRUST_REPO" = 1 ]; then
+  mkdir -p "$(dirname "$TRUST_FILE")"
+  grep -qxF "$ORIGIN_SLUG" "$TRUST_FILE" 2>/dev/null || printf '%s\n' "$ORIGIN_SLUG" >> "$TRUST_FILE"
+elif ! grep -qxF "$ORIGIN_SLUG" "$TRUST_FILE" 2>/dev/null; then
+  die "token-eater will run $ORIGIN_SLUG's own gate/build code on this machine (and, with --install-deps, its install scripts). If you trust this repo, re-run with --trust-repo (remembered after the first time)."
+fi
 RESULT_DIR="$REPO/.token-eater/runs"; mkdir -p "$RESULT_DIR"
 RUNID="${SLUG}-$(date +%Y%m%d-%H%M%S)"
 LOG="$RESULT_DIR/$RUNID"; mkdir -p "$LOG"
@@ -125,8 +144,12 @@ echo "-- fetch origin + isolated worktree off origin/main --"
 git -C "$REPO" fetch -q origin
 BASE="$(git -C "$REPO" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@' || true)"
 [ -z "$BASE" ] && { git -C "$REPO" show-ref --verify -q refs/remotes/origin/main && BASE=main || BASE=master; }
+# BASE is repo-derived (origin/HEAD) and flows into the recipe + `gh pr create --base`; keep it to a
+# plain git ref charset so a crafted default-branch name can't inject.
+case "$BASE" in *[!A-Za-z0-9._/-]*|''|-*) die "refusing suspicious base branch: '$BASE'";; esac
 WORKTREE="$(bash "$HERE/wt.sh" create "$REPO" "$RUNID" "$SLUG" "origin/$BASE")"
 BRANCH="$(git -C "$WORKTREE" rev-parse --abbrev-ref HEAD)"
+case "$BRANCH" in *[!A-Za-z0-9._/-]*|''|-*) die "unexpected branch name: '$BRANCH'";; esac  # we generate it; sanity only
 echo "  worktree: $WORKTREE"
 echo "  branch:   $BRANCH (off origin/$BASE)"
 
