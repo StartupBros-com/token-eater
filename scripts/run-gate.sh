@@ -59,17 +59,28 @@ emit() { printf '%s\t%s\n' "$1" "$2"; }
 
 detect_node_gate() {
   [ -f package.json ] || return 0
-  if has_package_script typecheck && has_package_script test; then emit node "pnpm typecheck && pnpm test"; fi
-  if has_package_script typecheck; then emit node "pnpm typecheck"; fi
-  if has_package_script test; then emit node "pnpm test"; fi
-  if has_package_script build; then emit node "pnpm build"; fi
-  if has_package_script format:check; then emit node "pnpm format:check"; fi
-  if has_package_script check:format; then emit node "pnpm check:format"; fi
-  if has_package_script lint; then emit node "pnpm lint"; fi
-  if [ -f tsconfig.json ] && has_cmd pnpm; then emit node "pnpm exec tsc --noEmit"; fi
-  if [ -f biome.json ] && has_cmd pnpm; then emit node "pnpm exec biome check ."; fi
-  if first_existing eslint.config.js eslint.config.mjs eslint.config.cjs .eslintrc .eslintrc.js .eslintrc.cjs .eslintrc.json >/dev/null && has_cmd pnpm; then emit node "pnpm exec eslint ."; fi
-  if first_existing .prettierrc .prettierrc.json .prettierrc.yml .prettierrc.yaml .prettierrc.js prettier.config.js prettier.config.cjs >/dev/null && has_cmd pnpm; then emit node "pnpm exec prettier --check ."; fi
+  # Use the project's OWN package manager (from its lockfile). Emitting `pnpm` for an npm/yarn/bun repo
+  # makes every real gate fail (esp. when pnpm isn't installed) and falsely drops to the soft tier.
+  # RUN = how to run a package.json script; EXEC = how to run a local bin.
+  local RUN EXEC
+  if   [ -f pnpm-lock.yaml ]    && has_cmd pnpm; then RUN="pnpm";     EXEC="pnpm exec"
+  elif [ -f bun.lockb ]         && has_cmd bun;  then RUN="bun run";  EXEC="bunx"
+  elif [ -f yarn.lock ]         && has_cmd yarn; then RUN="yarn";     EXEC="yarn exec"
+  elif [ -f package-lock.json ] && has_cmd npm;  then RUN="npm run";  EXEC="npx"
+  elif has_cmd pnpm; then RUN="pnpm"; EXEC="pnpm exec"
+  elif has_cmd npm;  then RUN="npm run"; EXEC="npx"
+  else return 0; fi
+  if has_package_script typecheck && has_package_script test; then emit node "$RUN typecheck && $RUN test"; fi
+  if has_package_script typecheck; then emit node "$RUN typecheck"; fi
+  if has_package_script test; then emit node "$RUN test"; fi
+  if has_package_script build; then emit node "$RUN build"; fi
+  if has_package_script format:check; then emit node "$RUN format:check"; fi
+  if has_package_script check:format; then emit node "$RUN check:format"; fi
+  if has_package_script lint; then emit node "$RUN lint"; fi
+  if [ -f tsconfig.json ]; then emit node "$EXEC tsc --noEmit"; fi
+  if [ -f biome.json ]; then emit node "$EXEC biome check ."; fi
+  if first_existing eslint.config.js eslint.config.mjs eslint.config.cjs .eslintrc .eslintrc.js .eslintrc.cjs .eslintrc.json >/dev/null; then emit node "$EXEC eslint ."; fi
+  if first_existing .prettierrc .prettierrc.json .prettierrc.yml .prettierrc.yaml .prettierrc.js prettier.config.js prettier.config.cjs >/dev/null; then emit node "$EXEC prettier --check ."; fi
 }
 
 detect_make_gate() {
