@@ -109,7 +109,7 @@ cmd_sweep() {
     [ -d "$wt" ] || continue
     # skip live worktrees (a running session owns them)
     case "$wt" in */.claude/jobs/*|/tmp/*) echo "skip(job): $wt"; continue ;; esac
-    local mt; mt="$(stat -c %Y "$wt" 2>/dev/null || echo 0)"
+    local mt; mt="$(stat -c %Y "$wt" 2>/dev/null || stat -f %m "$wt" 2>/dev/null || echo 0)"   # GNU stat || BSD/macOS stat
     if (( (now - mt) / 60 < ACTIVE_MIN )); then echo "skip(active): $wt"; continue; fi
     if command -v lsof >/dev/null 2>&1 && lsof +D "$wt" >/dev/null 2>&1; then echo "skip(in-use): $wt"; continue; fi
     local branch unpushed

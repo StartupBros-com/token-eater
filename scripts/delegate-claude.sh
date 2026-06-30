@@ -34,7 +34,7 @@ CB_REGEX='(usage limit|rate.?limit|429|All accounts are temporarily unavailable)
 # --- run the claude contract, cwd = worktree (inline prompt; schema only if supplied) ---
 SCHEMA_ARGS=(); [ -n "$SCHEMA" ] && SCHEMA_ARGS=(--json-schema "$(cat "$SCHEMA")")
 set +e
-( cd "$WT" && claude -p "$(cat "$PROMPT")" --output-format json "${SCHEMA_ARGS[@]}" --permission-mode acceptEdits ) >"$ENVRAW" 2>"$ERRLOG"
+( cd "$WT" && claude -p "$(cat "$PROMPT")" --output-format json ${SCHEMA_ARGS[@]+"${SCHEMA_ARGS[@]}"} --permission-mode acceptEdits ) >"$ENVRAW" 2>"$ERRLOG"
 CLAUDE_EXIT=$?
 set -e
 
@@ -52,7 +52,7 @@ if ! { command -v jq >/dev/null && jq -e . "$ENV" >/dev/null 2>&1; }; then
 fi
 
 # --- ground truth: what changed in the worktree ---
-mapfile -t CHANGED < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' | while IFS= read -r f; do [ -L "$f" ] || printf '%s\n' "$f"; done)
+CHANGED=(); while IFS= read -r _c; do CHANGED+=("$_c"); done < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' | while IFS= read -r f; do [ -L "$f" ] || printf '%s\n' "$f"; done)   # mapfile is bash 4+ (absent on macOS bash 3.2)
 MADE_CHANGES=false; [ "${#CHANGED[@]}" -gt 0 ] && MADE_CHANGES=true
 
 SCOPE_VIOLATION=false; OFFENDERS=()
@@ -79,8 +79,8 @@ jq -n \
   --argjson made "$MADE_CHANGES" --argjson scope "$SCOPE_VIOLATION" \
   --arg self "$SELF_STATUS" --arg summary "$SUMMARY" --arg verif "$VERIF" \
   --argjson issues "$ISSUES_JSON" --argjson cost "$COST" --argjson iserror "$IS_ERROR" --arg raw "$ENV" \
-  --argjson files "$(printf '%s\n' "${CHANGED[@]}" | jq -R . | jq -s 'map(select(length>0))')" \
-  --argjson offenders "$(printf '%s\n' "${OFFENDERS[@]}" | jq -R . | jq -s 'map(select(length>0))')" \
+  --argjson files "$(printf '%s\n' ${CHANGED[@]+"${CHANGED[@]}"} | jq -R . | jq -s 'map(select(length>0))')" \
+  --argjson offenders "$(printf '%s\n' ${OFFENDERS[@]+"${OFFENDERS[@]}"} | jq -R . | jq -s 'map(select(length>0))')" \
   '{adapter:$adapter, ok:$ok, circuit_breaker:$cb, made_changes:$made, files_modified:$files,
     scope_violation:$scope, scope_offenders:$offenders, self_status:$self, summary:$summary,
     verification_summary:$verif, issues:$issues, cost_usd:$cost, is_error:$iserror, raw_envelope:$raw}'

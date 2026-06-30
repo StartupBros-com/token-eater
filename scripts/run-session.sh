@@ -158,7 +158,7 @@ else
   # ecosystem (don't verify a JS change with an unrelated Python suite), trying candidates until one is green.
   _CANDS=(); while IFS= read -r _line; do [ -n "$_line" ] && _CANDS+=("$_line"); done < <(bash "$HERE/run-gate.sh" --list "$WORKTREE" 2>/dev/null || true)
   _eco=""; [ "${#_CANDS[@]}" -gt 0 ] && _eco="${_CANDS[0]%%$'\t'*}"
-  for _entry in "${_CANDS[@]}"; do
+  for _entry in ${_CANDS[@]+"${_CANDS[@]}"}; do   # ${a[@]+...} = empty-array-safe under set -u on bash 3.2 (macOS)
     _ce="${_entry%%$'\t'*}"; _cmd="${_entry#*$'\t'}"
     [ "$_ce" = "$_eco" ] || continue   # stay in the strongest ecosystem
     echo "  trying: $_cmd"
