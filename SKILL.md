@@ -50,6 +50,14 @@ The member's choice to run IS their consent to run their project's own checks, s
 on this first run (the engine then remembers it). Don't ask a separate "do you trust this repo?"
 question — that's jargon. Persist `{services, task}` to `./.token-eater.yaml`.
 
+**Dependency preflight (required companion):** token-eater's code reviewers are the compound-engineering
+plugin's `ce-*` personas. Check whether they're present (glob
+`~/.claude/plugins/marketplaces/*/plugins/compound-engineering/agents/ce-correctness-reviewer.md`). If
+**missing**, tell the member plainly — "I use the *compound-engineering* plugin for the code reviews;
+want me to install it?" — and on yes run `/plugin install compound-engineering@hov` (or
+`@every-marketplace`), then continue. (If they decline, the run still works but the review degrades to
+generic lenses — say so.) Never show the member the word "plugin dependency" or a `ce-*` agent name.
+
 Plain-language task → skill mapping:
 
 | Member-facing choice | skill | 
