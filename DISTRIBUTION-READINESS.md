@@ -43,6 +43,15 @@ mechanism yet**. Needs a design:
   first-class, honestly-labeled experience.
 - Course lesson / vault resource that teaches install + use.
 
+## Open — OBSERVABILITY (members will ask "what did this cost?")
+
+- **Per-run spend is unobservable on grok.** token-eater's whole pitch is "burn your credits," but the
+  grok headless log emits only ONE usage record (the orchestrator turn — e.g. 111k tokens, 99.6%
+  cached); the parallel native subagents (`grok-4.20-multi-agent`) that do the real work log no token
+  usage. So the DONE-block spend line is empty for grok. claude/codex delegates DO report `cost_usd`.
+  Options: query grok's usage API/dashboard for a per-run delta, show wall-clock + subagent count as a
+  proxy, or at minimum tell the member where to see their spend. (Verified on PR #830's run.)
+
 ## Standing rule (added 2026-06-29)
 
 Cross-platform validation on a real **macOS bash 3.2** target is part of the pre-distribution checklist
