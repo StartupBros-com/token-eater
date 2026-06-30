@@ -25,18 +25,58 @@ Want to burn expiring Grok credits? `/token-eater grok`. It spends only the serv
 
 <input> #$ARGUMENTS </input>
 
-## Argument parsing
+## Audience first: the member just types `/token-eater`
 
-Parse `$ARGUMENTS` for optional tokens; strip each recognized token before interpreting the remainder.
+**The person running this is usually a non-technical House of Vibe member.** They do NOT know what a
+gate, a flag, a parameter, or a "skill name" is — and they must never need to. They type
+`/token-eater` and nothing else. **You (Claude) are the friendly layer**: you collect what's needed
+through **plain-language, interactive multiple-choice questions** (use the AskUserQuestion tool — the
+member clicks a choice, never types a flag), you translate those choices into `run-session.sh` flags
+yourself, and you report back in plain English. The flags in this doc are *your* contract with the
+engine, never something you show the member.
+
+### First run on a project (not yet configured) → interactive preflight, then persist
+
+When there's no saved config (`references/setup-and-config.md`) and no `$ARGUMENTS`, ask a short
+**interactive multiple-choice preflight** (plain language, no jargon), then **save the answers to
+`./.token-eater.yaml`** so you never ask again for this project:
+
+1. **"What should I do?"** — plain-language options that map to skills (see the table below). Mark the
+   safest/most-broadly-useful as *(Recommended)*.
+2. **"Which credits should I use?"** — only if more than one service is signed in; otherwise pick the
+   one that is, silently. Phrase as "Claude / Grok / Codex credits", not "service".
+
+The member's choice to run IS their consent to run their project's own checks, so pass `--trust-repo`
+on this first run (the engine then remembers it). Don't ask a separate "do you trust this repo?"
+question — that's jargon. Persist `{services, task}` to `./.token-eater.yaml`.
+
+Plain-language task → skill mapping:
+
+| Member-facing choice | skill | 
+|----------------------|-------|
+| "Tidy up & simplify my code" *(Recommended)* | `simplify-and-refactor-code-isomorphically` |
+| "Remove unused / dead code" | `ce-simplify-code` (dead-code) |
+| "Split up big, messy files" | `de-monolithize-your-codebase-isomorphically` |
+| "Clean up the writing in my docs" | `de-slopify` |
+
+### Later runs (already configured) → zero questions
+
+If `./.token-eater.yaml` (or user config) already has `{services, task}`, just run with them — no
+questions. The engine's per-repo trust cache means `--trust-repo` is already remembered too. The
+member types `/token-eater`, you run, you report. To change the saved choices later they can run
+`/token-eater setup`.
+
+### Power-user arguments (optional — for someone who knows the tokens)
+
+A technical user MAY pass tokens; parse and strip them, then skip the matching preflight question.
+Never require these.
 
 | Token | Effect |
 |-------|--------|
-| `grok` / `codex` / `claude` | Spend this service this run. Overrides the saved default. |
-| a skill name (e.g. `de-monolithize`) | Skip the menu and run this skill. |
-| `dry-run` | Do the preflight and show the exact recipe that *would* run, without launching the service or opening a PR. |
-| `setup` | Re-run the one-question setup to change the saved default service. |
-
-If no service is named, use the saved default (`references/setup-and-config.md`); if there is no config, ask the one setup question (which service's credits to spend).
+| `grok` / `codex` / `claude` | Spend this service this run (overrides saved). |
+| a skill name (e.g. `de-monolithize`) | Run this skill; skip the "what should I do?" question. |
+| `setup` | Re-run the interactive preflight and rewrite the saved choices. |
+| `dry-run` | Preflight + show the recipe without launching or opening a PR. |
 
 ## How a session runs
 
@@ -46,7 +86,7 @@ A token-eater run is **one session**: one service, one skill, one polished draft
 
 2. **The gate is auto-detected — you don't need to pick it.** `run-session.sh` installs the project's deps into the worktree, then climbs a ladder (strongest green check first): **Tier A** `typecheck && test` → **Tier B** `typecheck`/`build`/`lint` → **Tier C (soft)** no deterministic gate, in which case it still runs but relies on the AI review + a clearly-flagged draft PR. So just **omit `--gate`** and let the engine choose; pass `--gate "<cmd>"` only to override. (Less-technical users with no tests still get a useful run, plainly labeled lower-confidence.)
 
-3. **Offer the menu, let the user pick.** Present the token-heavy skills that are installed and applicable here (see `skills-catalog.yaml` + `scripts/detect-skills.sh`), each with a one-line description. Let the user pick one (or honor the skill argument). See `references/session-run.md` for the menu and how to choose a **target** per skill.
+3. **The task is already chosen — don't show a jargon menu.** It came from the interactive preflight's "What should I do?" (mapped to a skill), from saved `./.token-eater.yaml`, or from a power-user skill argument. NEVER present raw skill names (`de-monolithize`, `mock-removal`, …) to a member — those only appear in the plain-language mapping above. Verify the chosen skill is installed (`skills-catalog.yaml` + `scripts/detect-skills.sh`); if not, fall back to the recommended one and say so plainly.
 
 4. **Let the skill find its own target — on the service's credits.** Do NOT pre-pick a target with a crude heuristic (e.g. "the largest file"): that wastes *your* tokens and overrides the skill's better, service-run analysis. Most of these skills discover their own work — de-monolithize runs a census that ranks monoliths and skips generated / justified-cohesive files; dead-code keys off the gate's unused-symbol output. Choosing the right target is itself token-heavy analysis that belongs on the service. So pass `--target` only as an optional **scope hint** (e.g. "focus on the API layer") — or omit it entirely and let the skill choose.
 
@@ -58,7 +98,13 @@ A token-eater run is **one session**: one service, one skill, one polished draft
      --rounds 2 --trust-repo [--gate "<override>"] [--install-deps] [--pace gentle|thorough] [--target "<hint>"]
    ```
 
-   `--gate` is optional (auto-detected — see step 2). Add `--dry-run` to render the recipe and stop. The service then runs the whole loop (skill -> gate -> review + fix, up to `--rounds` rounds -> push -> draft PR) on its own credits — the review uses the real `/ce-code-review` on the `claude` service and the genuine-persona fleet on `grok`/`codex`. This is the long-running part.
+   **You pass these flags, not the member.** `--trust-repo` is justified by the member's interactive
+   choice to run (and the engine caches it per repo); pass `--install-deps` only if the member opted
+   into it (don't, by default). `--gate` is optional (auto-detected — step 2). Add `--dry-run` to
+   render the recipe and stop. The service then runs the whole loop (skill -> gate -> review + fix, up
+   to `--rounds` rounds -> push -> draft PR) on its own credits — the review uses the real
+   `/ce-code-review` on the `claude` service and the genuine-persona fleet on `grok`/`codex`. This is
+   the long-running part.
 
 6. **Report — in plain language.** Translate the engine's output for the user, scaled to how technical they are. Always state, simply: what was cleaned up, that it's a **draft PR** (nothing merged), and the **confidence tier** — "✅ your tests pass" (Tier A), "✅ structural checks pass" (Tier B), or "⚠️ this project has no automated tests, so this was AI-reviewed only — please read it before merging" (Tier C). Include the spend line if present, and end with the one-line risk summary (tier + files touched). Then: **for your own peace of mind, run a fresh `/ce-code-review` (or your frontier-model review) on the PR before merging** — the service reviewed its own work, so an independent pass is still worth it. token-eater did not merge anything. On a clean failure (gate red on an explicit gate, or no PR), say so plainly; the worktree is kept and the user's checkout was never touched.
 

@@ -24,6 +24,14 @@ macOS). Two threads: make it **safe** for untrusted users, and make it **install
    charset) are rejected if malformed before reaching `gh pr create` or the agent recipe.
 - ✅ **`.env` no longer copied** into the worktree (was exposing secrets to the autonomous service).
 
+## Member-first runtime UX — DONE
+
+- ✅ **`/token-eater` and nothing else.** Members are non-technical and never type a flag. First run on a
+   project asks a short **interactive multiple-choice preflight** (plain language: "what should I do?" +
+   "which credits?"), **persists the answers to `./.token-eater.yaml`**, and every later run is
+   zero-questions. Flags (`--trust-repo`, `--install-deps`, `--gate`, `--pace`) are Claude↔engine only;
+   the member's interactive choice is the trust consent. No jargon skill-menu. (SKILL.md + setup-and-config.md.)
+
 ## Open — DELIVERY (makes it installable by a member)
 
 The HoV app (`~/SITES/prbot/apps/startupbros`) is course/challenge/vault-based with **no skill-install

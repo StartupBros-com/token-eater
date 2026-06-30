@@ -2,28 +2,29 @@
 
 Got AI credits about to expire? token-eater puts them to work.
 
-**You point it at a service. It spends that service's credits on safe, gate-verified cleanup work — de-slop, dead code, simplification, formatting — and opens draft PRs you review. Never merges.**
+**Just run `/token-eater`.** It tidies up your code in an isolated copy of your project, double-checks nothing broke, and opens a **draft pull request** for you to review. It **never merges** — you decide.
 
 ```
-/token-eater grok
-/token-eater codex
-/token-eater grok codex   # spend them in order
+/token-eater
 ```
 
-The service you name is the only real setting. There is no posture, tier, or routing economy. You pick what gets spent; token-eater does the chores.
+The first time, it asks a couple of plain questions (what to clean up, which credits to spend) and remembers them — after that, `/token-eater` just runs. No flags to learn.
 
 ## How it works
 
-1. **Name the service** on the command line, or run a one-question setup to save a default.
-2. **token-eater finds the chores** — only work whose correctness a deterministic check (tests, type check, lint, formatter) can prove. Each chore runs in an isolated copy of your project.
-3. **You get draft PRs** with a plain-language summary of what was cleaned. Review them yourself — or use `/ce-code-review` — before merging.
+1. **Run `/token-eater`.** First time on a project, pick what to do and which credits from a short menu; it saves your choices so it never asks again.
+2. **token-eater does the cleanup** in an isolated copy of your project and checks the result — with your project's own tests/type-check when it has them, or an AI code review when it doesn't (clearly labeled either way).
+3. **You get a draft PR** with a plain-language summary of what changed. Review it — or have AI review it (`/ce-code-review`) — before merging.
+
+> Power users: you can still pass `/token-eater grok de-monolithize`, `--gate`, `--install-deps`, etc. — see `SKILL.md`. Everyone else can ignore that.
 
 ## Safety
 
-- Only does work a machine can verify. If the project's own checks cannot prove it, token-eater does not do it.
-- Every chore runs in an isolated git worktree. Your branch and uncommitted work are never touched.
+- **Prefers proof, degrades honestly.** When your project has tests/type-check, it runs them and re-verifies the result independently. When it doesn't, it still helps but the PR is clearly labeled "AI-reviewed only — please read before merging."
+- **Runs your project's own code** (its tests/build; with opt-in, its install scripts), so it asks before running an unfamiliar project and remembers your answer. Point it only at projects you trust.
+- Every run happens in an isolated copy of your project. Your branch and uncommitted work are never touched.
 - Never merges, never marks a PR ready, never auto-pushes to main.
-- Only spends the service(s) you named. It never reaches for a service you did not choose.
+- Only spends the credits you chose.
 
 ## Status
 
