@@ -131,9 +131,11 @@ run_gate() {
   echo "token-eater gate: $GATE"
   # Bound every gate with a timeout: a watch-mode `test` script, a hanging install, or a gate run
   # against missing deps must not wedge the run forever. A gate that doesn't finish is not green.
-  local ok=0
-  if has_cmd timeout; then
-    timeout "${TOKEN_EATER_GATE_TIMEOUT:-900}" bash -lc "$GATE" || ok=$?
+  # macOS has no `timeout`; use `gtimeout` (brew coreutils) if present, else run unbounded.
+  local ok=0 TO=""
+  if has_cmd timeout; then TO=timeout; elif has_cmd gtimeout; then TO=gtimeout; fi
+  if [ -n "$TO" ]; then
+    "$TO" "${TOKEN_EATER_GATE_TIMEOUT:-900}" bash -lc "$GATE" || ok=$?
   else
     bash -lc "$GATE" || ok=$?
   fi
@@ -149,7 +151,7 @@ run_gate() {
 cd "$TARGET"
 
 if [ "$LIST" = 1 ]; then
-  gate_candidates | grep -v '^[[:space:]]*$'
+  gate_candidates | grep -v '^[[:space:]]*$' || true   # no candidates is not an error
   exit 0
 fi
 

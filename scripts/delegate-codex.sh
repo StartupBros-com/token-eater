@@ -33,7 +33,7 @@ CB_REGEX='(usage limit reached|rate.?limit|429 too many requests|All accounts ar
 # --- run the codex contract, cwd = worktree (output-schema only if supplied) ---
 SCHEMA_ARGS=(); [ -n "$SCHEMA" ] && SCHEMA_ARGS=(--output-schema "$SCHEMA")
 set +e
-( cd "$WT" && codex exec -s workspace-write "${SCHEMA_ARGS[@]}" -o "$RESULT" - < "$PROMPT" ) >"$STDOUT" 2>"$ERRLOG"
+( cd "$WT" && codex exec -s workspace-write ${SCHEMA_ARGS[@]+"${SCHEMA_ARGS[@]}"} -o "$RESULT" - < "$PROMPT" ) >"$STDOUT" 2>"$ERRLOG"
 CODEX_EXIT=$?
 set -e
 
@@ -50,7 +50,7 @@ if [ "$CODEX_EXIT" -ne 0 ] && [ ! -s "$RESULT" ]; then
 fi
 
 # --- ground truth: what changed in the worktree (authoritative file list) ---
-mapfile -t CHANGED < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' | while IFS= read -r f; do [ -L "$f" ] || printf '%s\n' "$f"; done)
+CHANGED=(); while IFS= read -r _c; do CHANGED+=("$_c"); done < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' | while IFS= read -r f; do [ -L "$f" ] || printf '%s\n' "$f"; done)   # mapfile is bash 4+ (absent on macOS bash 3.2)
 MADE_CHANGES=false; [ "${#CHANGED[@]}" -gt 0 ] && MADE_CHANGES=true
 
 # --- optional scope check against ground truth ---
@@ -82,8 +82,8 @@ if command -v jq >/dev/null; then
     --argjson made "$MADE_CHANGES" --argjson scope "$SCOPE_VIOLATION" \
     --arg self "$SELF_STATUS" --arg summary "$SUMMARY" --arg verif "$VERIF" \
     --argjson issues "$ISSUES_JSON" --arg raw "$RESULT" \
-    --argjson files "$(printf '%s\n' "${CHANGED[@]}" | jq -R . | jq -s 'map(select(length>0))')" \
-    --argjson offenders "$(printf '%s\n' "${OFFENDERS[@]}" | jq -R . | jq -s 'map(select(length>0))')" \
+    --argjson files "$(printf '%s\n' ${CHANGED[@]+"${CHANGED[@]}"} | jq -R . | jq -s 'map(select(length>0))')" \
+    --argjson offenders "$(printf '%s\n' ${OFFENDERS[@]+"${OFFENDERS[@]}"} | jq -R . | jq -s 'map(select(length>0))')" \
     '{adapter:$adapter, ok:$ok, circuit_breaker:$cb, made_changes:$made, files_modified:$files,
       scope_violation:$scope, scope_offenders:$offenders, self_status:$self, summary:$summary,
       verification_summary:$verif, issues:$issues, raw_envelope:$raw}'
