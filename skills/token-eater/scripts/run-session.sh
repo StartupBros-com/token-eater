@@ -219,8 +219,10 @@ CE_CATALOG=""
 # personas above, instead of token-eater scraping git and hardcoding markdown. Empty if the plugin is
 # absent (the engine then falls back to a minimal generated stub).
 CE_PRDESC="$(ls "$HOME"/.claude/plugins/marketplaces/*/plugins/compound-engineering/skills/ce-commit-push-pr/references/pr-description-writing.md 2>/dev/null | head -1 || true)"
-# Absolute path OUTSIDE the repo tree (so it is never committed) where the service writes that body.
-SERVICE_PR_BODY="$LOG/pr-body.from-service.md"
+# Path INSIDE the worktree so the sandboxed codex delegate (its writes are confined to $WORKTREE) can
+# create it; git-excluded just below so it is never committed. The service writes its PR body here.
+SERVICE_PR_BODY="$WORKTREE/.token-eater-pr-body.md"
+printf '%s\n' '.token-eater-pr-body.md' >> "$(git -C "$WORKTREE" rev-parse --git-path info/exclude)" 2>/dev/null || true
 
 if [ "$SERVICE" = claude ]; then
   # claude runs the REAL /ce-code-review: its ce-* reviewer subagents are NATIVE and reliable here, so
@@ -303,7 +305,7 @@ THE GATE: $GATE_DESC
 Your project's dependencies have already been installed in this worktree. When there is a gate, run
 it yourself and trust it over your own judgment.
 
-PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
+PROCEDURE - do not stop until step 7 is done or you hit a hard blocker:
 
 1. Run \`/$SKILL\`. Let the skill's OWN analysis pick the target(s): most maintenance skills scan
    the repo themselves to find their work - e.g. de-monolithize runs a census that RANKS monoliths
@@ -457,9 +459,19 @@ if [ -z "$PR_URL" ]; then
               --title "$PR_TITLE" \
               --body-file "$PR_BODY_FILE" \
               2>>"$LOG/pr.log" || true)"
+elif [ "$GATE_TIER" = soft ]; then
+  # A PR already existed (a retry, or one a worker opened despite the recipe). We won't clobber a
+  # human-edited body, but the soft-tier "no automated tests" banner is a SAFETY invariant - ensure it
+  # is present, prepending it only if it isn't already there.
+  _cur="$(gh pr view "$PR_URL" --repo "$ORIGIN_SLUG" --json body --jq '.body' 2>/dev/null || true)"
+  case "$_cur" in
+    *"could not machine-verify this change"*) : ;;   # banner already present - leave the body as-is
+    *) gh pr edit "$PR_URL" --repo "$ORIGIN_SLUG" --body "> [!WARNING]
+> **This project has no automated tests/typecheck, so token-eater could not machine-verify this change.** An AI review ran, but nothing here proves it was thorough. **Read the diff carefully before merging.**
+
+$_cur" >/dev/null 2>&1 || true ;;
+  esac
 fi
-# If a PR already existed (re-run of the same branch), leave its body untouched so we never clobber a
-# human-edited description.
 [ -z "$PR_URL" ] && { echo "token-eater: changes ready but could not open a PR (see $LOG/pr.log). Branch kept: $BRANCH"; exit 5; }
 
 # Best-effort spend line - the whole point is burning credits, so surface what this run cost.
