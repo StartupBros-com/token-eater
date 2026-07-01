@@ -222,7 +222,8 @@ CE_PRDESC="$(ls "$HOME"/.claude/plugins/marketplaces/*/plugins/compound-engineer
 # Path INSIDE the worktree so the sandboxed codex delegate (its writes are confined to $WORKTREE) can
 # create it; git-excluded just below so it is never committed. The service writes its PR body here.
 SERVICE_PR_BODY="$WORKTREE/.token-eater-pr-body.md"
-printf '%s\n' '.token-eater-pr-body.md' >> "$(git -C "$WORKTREE" rev-parse --git-path info/exclude)" 2>/dev/null || true
+_excl="$(git -C "$WORKTREE" rev-parse --git-path info/exclude 2>/dev/null || true)"
+[ -n "$_excl" ] && ! grep -qxF '.token-eater-pr-body.md' "$_excl" 2>/dev/null && printf '%s\n' '.token-eater-pr-body.md' >> "$_excl"
 
 if [ "$SERVICE" = claude ]; then
   # claude runs the REAL /ce-code-review: its ce-* reviewer subagents are NATIVE and reliable here, so
