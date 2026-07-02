@@ -214,6 +214,17 @@ CE_AGENTS_DIR="$(ls -d "$HOME"/.claude/plugins/marketplaces/*/plugins/compound-e
 CE_CATALOG=""
 [ -n "$CE_SKILL_DIR" ] && [ -f "$CE_SKILL_DIR/references/persona-catalog.md" ] && CE_CATALOG="$CE_SKILL_DIR/references/persona-catalog.md"
 
+# Discover ce-commit-push-pr's PR-description guide so the SERVICE authors the PR body (value-first,
+# sized to the change) - the same "point the agent at the real CE reference" pattern as the review
+# personas above, instead of token-eater scraping git and hardcoding markdown. Empty if the plugin is
+# absent (the engine then falls back to a minimal generated stub).
+CE_PRDESC="$(ls "$HOME"/.claude/plugins/marketplaces/*/plugins/compound-engineering/skills/ce-commit-push-pr/references/pr-description-writing.md 2>/dev/null | head -1 || true)"
+# Path INSIDE the worktree so the sandboxed codex delegate (its writes are confined to $WORKTREE) can
+# create it; git-excluded just below so it is never committed. The service writes its PR body here.
+SERVICE_PR_BODY="$WORKTREE/.token-eater-pr-body.md"
+_excl="$(git -C "$WORKTREE" rev-parse --git-path info/exclude 2>/dev/null || true)"
+[ -n "$_excl" ] && ! grep -qxF '.token-eater-pr-body.md' "$_excl" 2>/dev/null && printf '%s\n' '.token-eater-pr-body.md' >> "$_excl"
+
 if [ "$SERVICE" = claude ]; then
   # claude runs the REAL /ce-code-review: its ce-* reviewer subagents are NATIVE and reliable here, so
   # no persona-file workaround is needed - just invoke the skill and apply its fixes.
@@ -276,6 +287,13 @@ else
   REGATE_STEP="Re-run the gate (\`$GATE\`) - it MUST stay green after any review fixes; commit any fix the review did not already commit. If P0/P1 issues remain, fix, re-gate, and review again. Repeat steps 4-5 until no P0/P1 remain, OR you have done $ROUNDS review rounds."
   PR_GATE_NOTE="the gate \`$GATE\` passes"
 fi
+# The SERVICE authors the PR description - it did the work and knows the "why". token-eater only
+# orchestrates and appends its own title + safety/provenance wrapper at PR-creation time.
+if [ -n "$CE_PRDESC" ]; then
+  PR_DESC_STEP="Write the PR description for this change to the EXACT absolute path \`$SERVICE_PR_BODY\` (it is outside the repo - do NOT \`git add\` it). Follow the house style in \`$CE_PRDESC\`: value-first - lead with what is now possible, fixed, or simplified, NOT a file-by-file restatement of the diff (reviewers can already see the diff); size the description to the change; reach for a small table or diagram only when it conveys the change faster than prose. Write ONLY the markdown body - NO title line and NO badge/provenance footer (token-eater derives the title from your primary commit and appends its own footer)."
+else
+  PR_DESC_STEP="Write the PR description for this change to the EXACT absolute path \`$SERVICE_PR_BODY\` (it is outside the repo - do NOT \`git add\` it). Value-first: lead with what is now possible, fixed, or simplified in 1-2 sentences, NOT a file-by-file restatement of the diff; then only the context a reviewer needs, sized to the change. Write ONLY the markdown body - NO title line and NO footer."
+fi
 RECIPE="$LOG/recipe.txt"
 cat > "$RECIPE" <<EOF
 You are token-eater's autonomous worker for ONE session. You are inside a fresh git worktree of
@@ -288,7 +306,7 @@ THE GATE: $GATE_DESC
 Your project's dependencies have already been installed in this worktree. When there is a gate, run
 it yourself and trust it over your own judgment.
 
-PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
+PROCEDURE - do not stop until step 7 is done or you hit a hard blocker:
 
 1. Run \`/$SKILL\`. Let the skill's OWN analysis pick the target(s): most maintenance skills scan
    the repo themselves to find their work - e.g. de-monolithize runs a census that RANKS monoliths
@@ -312,8 +330,10 @@ PROCEDURE - do not stop until step 6 is done or you hit a hard blocker:
        git push -u origin $BRANCH
    NEVER open a PR, NEVER merge, NEVER mark anything ready, NEVER push to \`$BASE\`.
 
+7. $PR_DESC_STEP
+
 FINAL OUTPUT: a summary - files changed, final gate result, how many review rounds, any nits left
-for the human (token-eater will open the draft PR).
+for the human (token-eater opens the draft PR, using the description you wrote in step 7).
 
 HARD RULES: stay in this worktree; keep the gate green at every commit; draft PR only; never merge;
 never touch \`$BASE\`; never weaken tests, validation, error handling, or security checks.
@@ -401,27 +421,59 @@ fi
 # 7. OPEN THE DRAFT PR ourselves - only now, AFTER the independent gate verify above. The worker only
 #    pushed; token-eater owns PR creation so a red-gate/non-draft PR can never exist. (If a PR somehow
 #    already exists for this branch, reuse it.)
-if [ "$GATE_TIER" = soft ]; then GATE_SUMMARY="no automated gate (AI-review-only)"; else GATE_SUMMARY="gate \`$GATE\` passes"; fi
+# Assemble the PR body. The narrative is AUTHORED BY THE SERVICE (recipe step 7, value-first, following
+# ce-commit-push-pr's guide) - the agent that did the work knows the "why". token-eater owns only its
+# safety invariants around it: the title (from the primary commit), the soft-tier banner, and a small
+# provenance footer. If the service didn't produce a body (older service / it skipped), fall back to a
+# minimal honest stub - NOT a diff restatement.
+_RANGE="origin/$BASE..HEAD"
+PR_TITLE="$(git -C "$WORKTREE" log --reverse --format='%s' "$_RANGE" 2>/dev/null | grep -v '^[[:space:]]*$' | head -1)"
+[ -n "$PR_TITLE" ] || PR_TITLE="$SKILL: automated maintenance pass"
+if [ "$GATE_TIER" = soft ]; then _gate_line="no automated gate - **AI-reviewed only**"; else _gate_line="gate \`$GATE\` (independently re-verified green by token-eater)"; fi
+
+PR_BODY_FILE="$LOG/pr-body.md"
+{
+  # (1) soft-tier banner - engine-owned safety flag, always first
+  if [ "$GATE_TIER" = soft ]; then
+    printf '> [!WARNING]\n'
+    printf '> **This project has no automated tests/typecheck, so token-eater could not machine-verify this change.** An AI review ran, but nothing here proves it was thorough. **Read the diff carefully before merging.**\n\n'
+  fi
+  # (2) the narrative - service-authored if present, else a minimal honest stub
+  if [ -s "$SERVICE_PR_BODY" ]; then
+    cat "$SERVICE_PR_BODY"; printf '\n'
+  else
+    printf '## Summary\n\ntoken-eater ran `/%s` via **%s** on this repository (autonomous maintenance pass). See the commits and diff for specifics.\n\n' "$SKILL" "$SERVICE"
+    _cl="$(git -C "$WORKTREE" log --reverse --format='- `%h` %s' "$_RANGE" 2>/dev/null)"
+    [ -n "$_cl" ] && printf '%s\n\n' "$_cl"
+  fi
+  # (3) provenance + caveats footer - engine-owned
+  printf -- '---\n'
+  printf '<sub>🤖 Opened as a **draft** by [token-eater](https://github.com/StartupBros/token-eater) via **%s** running `/%s` - %s. Self-reviewed by the same model (up to %s round(s)); **run your own independent review before merging.** Nothing was merged.</sub>\n' \
+    "$SERVICE" "$SKILL" "$_gate_line" "$ROUNDS"
+} > "$PR_BODY_FILE"
+
 PR_URL="$(gh pr list --repo "$ORIGIN_SLUG" --head "$BRANCH" --json url --jq '.[0].url' 2>/dev/null || true)"
 if [ -z "$PR_URL" ]; then
   echo "-- opening the draft PR (after independent gate verification) --"
   git -C "$WORKTREE" push -u origin "$BRANCH" >/dev/null 2>&1 || true
   PR_URL="$(gh pr create --repo "$ORIGIN_SLUG" --base "$BASE" --head "$BRANCH" --draft \
-              --title "chore(token-eater): $SLUG" \
-              --body "Automated $SKILL pass by token-eater via $SERVICE ($GATE_SUMMARY). Draft - review before merging; token-eater did not merge." \
+              --title "$PR_TITLE" \
+              --body-file "$PR_BODY_FILE" \
               2>>"$LOG/pr.log" || true)"
+elif [ "$GATE_TIER" = soft ]; then
+  # A PR already existed (a retry, or one a worker opened despite the recipe). We won't clobber a
+  # human-edited body, but the soft-tier "no automated tests" banner is a SAFETY invariant - ensure it
+  # is present, prepending it only if it isn't already there.
+  _cur="$(gh pr view "$PR_URL" --repo "$ORIGIN_SLUG" --json body --jq '.body' 2>/dev/null || true)"
+  case "$_cur" in
+    *"could not machine-verify this change"*) : ;;   # banner already present - leave the body as-is
+    *) gh pr edit "$PR_URL" --repo "$ORIGIN_SLUG" --body "> [!WARNING]
+> **This project has no automated tests/typecheck, so token-eater could not machine-verify this change.** An AI review ran, but nothing here proves it was thorough. **Read the diff carefully before merging.**
+
+$_cur" >/dev/null 2>&1 || true ;;
+  esac
 fi
 [ -z "$PR_URL" ] && { echo "token-eater: changes ready but could not open a PR (see $LOG/pr.log). Branch kept: $BRANCH"; exit 5; }
-
-# Soft tier: prepend a prominent "no automated tests" banner to the PR body (whoever opened it), so a
-# less-technical reviewer cannot miss that this change was AI-reviewed only.
-if [ "$GATE_TIER" = soft ]; then
-  _body="$(gh pr view "$PR_URL" --repo "$ORIGIN_SLUG" --json body --jq '.body' 2>/dev/null || true)"
-  gh pr edit "$PR_URL" --repo "$ORIGIN_SLUG" --body "> [!WARNING]
-> **This project has no automated tests/typecheck, so token-eater could not machine-verify this change.** An AI review was requested, but nothing here proves it ran or was thorough. **Please read the diff carefully before merging.**
-
-$_body" >/dev/null 2>&1 || true
-fi
 
 # Best-effort spend line - the whole point is burning credits, so surface what this run cost.
 # claude/codex delegates emit .cost_usd; grok has no per-run cost in its envelope (skip, not error).
