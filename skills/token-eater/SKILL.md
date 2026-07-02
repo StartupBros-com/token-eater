@@ -17,6 +17,11 @@ Want to burn expiring Grok credits? `/token-eater grok`. It spends only the serv
 
 **Skill files resolve from THIS skill's base directory, not the user's project.** Every `scripts/...`, `references/...`, and `skills-catalog.yaml` path below is relative to the directory this `SKILL.md` lives in. Invoke scripts by their absolute path — e.g. `bash <skill-dir>/scripts/run-session.sh ...`. The *work* runs in the user's project (a worktree of it); the *tooling* lives with the skill.
 
+**Codex on Windows:** when this skill is surfaced through `C:/Users/will/.agents/skills/token-eater`,
+run the shell tooling through WSL, not native Windows path syntax. Prefer this live WSL skill directory
+`/home/will/SITES/token-eater/skills/token-eater` and invoke scripts via `wsl -e bash -lc 'bash /home/will/SITES/token-eater/skills/token-eater/scripts/run-session.sh ...'`.
+If you must use the Windows copy, translate it to `/mnt/c/Users/will/.agents/skills/token-eater` before passing it to bash.
+
 ## Status
 
 `[BETA]` — manual invocation only (`disable-model-invocation: true`: a human must type `/token-eater`; other skills cannot hand off to it).
