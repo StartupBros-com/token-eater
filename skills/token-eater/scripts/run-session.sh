@@ -127,6 +127,18 @@ if [ "$TRUST_REPO" = 1 ]; then
 elif ! grep -qxF "$ORIGIN_SLUG" "$TRUST_FILE" 2>/dev/null; then
   die "token-eater will run $ORIGIN_SLUG's own gate/build code on this machine (and, with --install-deps, its install scripts). If you trust this repo, re-run with --trust-repo (remembered after the first time)."
 fi
+# Make run artifacts + worktrees invisible to the member's `git status`/`git add .` BEFORE
+# anything is created (pro-gate self-review P1: RESULT_DIR used to be created ~30 lines before
+# wt.sh installed the excludes, so an early failure — auth, fetch, worktree-add — left an
+# unignored .token-eater/ in the checkout). wt.sh repeats this idempotently for standalone use.
+_excl="$(git -C "$REPO" rev-parse --git-path info/exclude 2>/dev/null || true)"
+case "$_excl" in ''|/*) : ;; *) _excl="$REPO/$_excl" ;; esac
+if [ -n "$_excl" ]; then
+  mkdir -p "$(dirname "$_excl")" 2>/dev/null || true
+  for _ig in ".claude/worktrees/" ".token-eater/"; do
+    grep -qxF "$_ig" "$_excl" 2>/dev/null || printf '%s\n' "$_ig" >> "$_excl" 2>/dev/null || true
+  done
+fi
 RESULT_DIR="$REPO/.token-eater/runs"; mkdir -p "$RESULT_DIR"
 RUNID="${SLUG}-$(date +%Y%m%d-%H%M%S)"
 LOG="$RESULT_DIR/$RUNID"; mkdir -p "$LOG"
@@ -174,7 +186,18 @@ fi
 # Whatever the state, the service must never install: through the shared symlink an install
 # would mutate the member's real checkout, and install scripts are the opt-in RCE path.
 if [ "$INSTALL_DEPS" = 1 ]; then
-  DEPS_NOTE="Project dependencies were installed fresh in this worktree."
+  # Verify the install actually produced artifacts — ensure_deps is deliberately best-effort
+  # and silent, so "installed fresh" was an overclaim whenever it failed (pro-gate self-review
+  # P2). Ecosystem-aware: go/cargo fetch into global caches, so only ecosystems with in-tree
+  # artifacts are checked.
+  _deps_ok=1
+  [ -f "$WORKTREE/package.json" ] && [ ! -e "$WORKTREE/node_modules" ] && _deps_ok=0
+  if { [ -f "$WORKTREE/uv.lock" ] || [ -f "$WORKTREE/poetry.lock" ]; } && [ ! -e "$WORKTREE/.venv" ] && [ ! -e "$WORKTREE/venv" ]; then _deps_ok=0; fi
+  if [ "$_deps_ok" = 1 ]; then
+    DEPS_NOTE="Project dependencies were installed fresh in this worktree."
+  else
+    DEPS_NOTE="A dependency install was attempted (--install-deps) but expected artifacts are missing - dependencies may be incomplete. Do NOT install them yourself; if the gate fails on missing dependencies, say so in your summary."
+  fi
 elif [ -e "$WORKTREE/node_modules" ] || [ -e "$WORKTREE/.venv" ] || [ -e "$WORKTREE/venv" ]; then
   DEPS_NOTE="Project dependencies are available, shared from the user's main checkout. Do NOT run any package-manager install here - if a dependency is genuinely missing, note it in your summary instead of installing."
 else

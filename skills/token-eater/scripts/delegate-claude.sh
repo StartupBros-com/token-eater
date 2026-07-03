@@ -32,15 +32,21 @@ ENVRAW="$RUNDIR/stdout.json"; ERRLOG="$RUNDIR/stderr.log"
 CB_REGEX='(usage limit|rate.?limit|429|All accounts are temporarily unavailable)'
 
 # --- run the claude contract, cwd = worktree (inline prompt; schema only if supplied) ---
-# Permissions: the recipe REQUIRES Bash (run the gate, git add/commit/push) — under headless
-# `-p`, `--permission-mode acceptEdits` silently DENIES every Bash call, so claude could edit
-# files but never commit, and each run ended "service did not complete (no commits)".
-# `--dangerously-skip-permissions` is the parity choice with the other adapters (grok runs
-# `--always-approve`, codex `-s workspace-write`): the blast radius is already bounded by the
-# fresh worktree, the explicit per-repo trust gate, and token-eater's draft-only PR invariants.
+# Permissions: the recipe REQUIRES Bash (run the gate, git add/commit/push). Under headless
+# `-p`, un-allowlisted tools are DENIED (no prompt is possible), so on a fresh member machine
+# plain acceptEdits means claude can edit but never run the gate or commit — masked on dev
+# boxes whose user settings carry broad Bash allow rules. The explicit allowlist below makes
+# behavior deterministic on every host. Bash must be broad because the gate command is
+# repo-specific (pnpm/pytest/cargo/make/...), and running the target repo's own code under
+# the user's OS account is already token-eater's documented trust boundary (explicit
+# --trust-repo consent; grok runs --always-approve, codex workspace-write). This is still
+# strictly tighter than --dangerously-skip-permissions: no network tools, no MCP — only file
+# edits, Bash, skills, and subagents. OS-level sandboxing (bwrap/sandbox-exec) remains the
+# tracked future hardening (DISTRIBUTION-READINESS.md).
 SCHEMA_ARGS=(); [ -n "$SCHEMA" ] && SCHEMA_ARGS=(--json-schema "$(cat "$SCHEMA")")
 set +e
-( cd "$WT" && claude -p "$(cat "$PROMPT")" --output-format json ${SCHEMA_ARGS[@]+"${SCHEMA_ARGS[@]}"} --dangerously-skip-permissions ) >"$ENVRAW" 2>"$ERRLOG"
+( cd "$WT" && claude -p "$(cat "$PROMPT")" --output-format json ${SCHEMA_ARGS[@]+"${SCHEMA_ARGS[@]}"} \
+    --permission-mode acceptEdits --allowedTools "Bash" "Skill" "Task" ) >"$ENVRAW" 2>"$ERRLOG"
 CLAUDE_EXIT=$?
 set -e
 
