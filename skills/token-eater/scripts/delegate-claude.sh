@@ -32,9 +32,15 @@ ENVRAW="$RUNDIR/stdout.json"; ERRLOG="$RUNDIR/stderr.log"
 CB_REGEX='(usage limit|rate.?limit|429|All accounts are temporarily unavailable)'
 
 # --- run the claude contract, cwd = worktree (inline prompt; schema only if supplied) ---
+# Permissions: the recipe REQUIRES Bash (run the gate, git add/commit/push) — under headless
+# `-p`, `--permission-mode acceptEdits` silently DENIES every Bash call, so claude could edit
+# files but never commit, and each run ended "service did not complete (no commits)".
+# `--dangerously-skip-permissions` is the parity choice with the other adapters (grok runs
+# `--always-approve`, codex `-s workspace-write`): the blast radius is already bounded by the
+# fresh worktree, the explicit per-repo trust gate, and token-eater's draft-only PR invariants.
 SCHEMA_ARGS=(); [ -n "$SCHEMA" ] && SCHEMA_ARGS=(--json-schema "$(cat "$SCHEMA")")
 set +e
-( cd "$WT" && claude -p "$(cat "$PROMPT")" --output-format json ${SCHEMA_ARGS[@]+"${SCHEMA_ARGS[@]}"} --permission-mode acceptEdits ) >"$ENVRAW" 2>"$ERRLOG"
+( cd "$WT" && claude -p "$(cat "$PROMPT")" --output-format json ${SCHEMA_ARGS[@]+"${SCHEMA_ARGS[@]}"} --dangerously-skip-permissions ) >"$ENVRAW" 2>"$ERRLOG"
 CLAUDE_EXIT=$?
 set -e
 

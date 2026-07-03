@@ -60,7 +60,7 @@ ENV="$RUNDIR/envelope.json"
 awk 'f||/^[[:space:]]*\{/{f=1; print}' "$ENVRAW" > "$ENV"
 
 # --- ground truth: what changed in the worktree (the authoritative file list) ---
-mapfile -t CHANGED < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' | while IFS= read -r f; do [ -L "$f" ] || printf '%s\n' "$f"; done)
+CHANGED=(); while IFS= read -r _c; do CHANGED+=("$_c"); done < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' | while IFS= read -r f; do [ -L "$f" ] || printf '%s\n' "$f"; done)   # mapfile is bash 4+ (absent on macOS bash 3.2)
 MADE_CHANGES=false; [ "${#CHANGED[@]}" -gt 0 ] && MADE_CHANGES=true
 
 # --- optional scope check: every changed file must be in the allowed list ---
@@ -109,8 +109,8 @@ if command -v jq >/dev/null; then
     --arg summary "$SUMMARY" \
     --argjson issues "$ISSUES_JSON" \
     --arg raw "$ENV" \
-    --argjson files "$(printf '%s\n' "${CHANGED[@]}" | jq -R . | jq -s 'map(select(length>0))')" \
-    --argjson offenders "$(printf '%s\n' "${OFFENDERS[@]}" | jq -R . | jq -s 'map(select(length>0))')" \
+    --argjson files "$(printf '%s\n' ${CHANGED[@]+"${CHANGED[@]}"} | jq -R . | jq -s 'map(select(length>0))')" \
+    --argjson offenders "$(printf '%s\n' ${OFFENDERS[@]+"${OFFENDERS[@]}"} | jq -R . | jq -s 'map(select(length>0))')" \
     '{adapter:$adapter, ok:$ok, circuit_breaker:$cb, made_changes:$made, files_modified:$files,
       scope_violation:$scope, scope_offenders:$offenders, stop_reason:$stop,
       grok_self_status:$gstatus, summary:$summary, issues:$issues, raw_envelope:$raw}'

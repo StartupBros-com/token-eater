@@ -40,7 +40,14 @@ has_cmd() { command -v "$1" >/dev/null 2>&1; }
 # user opts in for a repo they trust. Best-effort + offline-friendly: never fail the run here - if
 # install can't complete, the gate ladder simply falls to a check that does work.
 ensure_deps() {
-  local wt="$1"
+  local wt="$1" d
+  # wt.sh symlinks node_modules/.venv/venv from the MAIN checkout so gates resolve without an
+  # install. Installing THROUGH those symlinks would mutate the member's real checkout — the
+  # exact "never touched" invariant this tool promises. Replace symlinks with a real,
+  # worktree-local install before any package manager runs.
+  for d in node_modules .venv venv; do
+    [ -L "$wt/$d" ] && rm -f "$wt/$d"
+  done
   ( cd "$wt" 2>/dev/null || exit 0
     if   [ -f pnpm-lock.yaml ]   && has_cmd pnpm; then pnpm install --frozen-lockfile --prefer-offline >/dev/null 2>&1 || pnpm install --prefer-offline >/dev/null 2>&1 || true
     elif [ -f package-lock.json ] && has_cmd npm;  then npm ci >/dev/null 2>&1 || npm install >/dev/null 2>&1 || true
@@ -160,6 +167,18 @@ if [ "$INSTALL_DEPS" = 1 ]; then
   ensure_deps "$WORKTREE"
 else
   echo "-- skipping dependency install (default; pass --install-deps for repos you trust if the gate needs deps) --"
+fi
+
+# Tell the service the TRUTH about dependency state (the recipe used to claim "already
+# installed" unconditionally, and the service wasted turns mis-diagnosing gate failures).
+# Whatever the state, the service must never install: through the shared symlink an install
+# would mutate the member's real checkout, and install scripts are the opt-in RCE path.
+if [ "$INSTALL_DEPS" = 1 ]; then
+  DEPS_NOTE="Project dependencies were installed fresh in this worktree."
+elif [ -e "$WORKTREE/node_modules" ] || [ -e "$WORKTREE/.venv" ] || [ -e "$WORKTREE/venv" ]; then
+  DEPS_NOTE="Project dependencies are available, shared from the user's main checkout. Do NOT run any package-manager install here - if a dependency is genuinely missing, note it in your summary instead of installing."
+else
+  DEPS_NOTE="Project dependencies may NOT be installed in this worktree. Do NOT install them yourself - if the gate fails on missing dependencies, stop and say so in your summary."
 fi
 
 # 3. BASELINE GATE - the STRONGEST deterministic check that is GREEN before we start (a red gate can't
@@ -303,7 +322,7 @@ GOAL: $GOAL_LINE
 Use the \`/$SKILL\` skill as your method.
 
 THE GATE: $GATE_DESC
-Your project's dependencies have already been installed in this worktree. When there is a gate, run
+$DEPS_NOTE When there is a gate, run
 it yourself and trust it over your own judgment.
 
 PROCEDURE - do not stop until step 7 is done or you hit a hard blocker:
@@ -336,7 +355,8 @@ FINAL OUTPUT: a summary - files changed, final gate result, how many review roun
 for the human (token-eater opens the draft PR, using the description you wrote in step 7).
 
 HARD RULES: stay in this worktree; keep the gate green at every commit; draft PR only; never merge;
-never touch \`$BASE\`; never weaken tests, validation, error handling, or security checks.
+never touch \`$BASE\`; never weaken tests, validation, error handling, or security checks; never run
+package-manager installs (pnpm/npm/pip/uv/...) - dependencies are provisioned by token-eater.
 EOF
 
 if [ "$DRYRUN" = 1 ]; then
@@ -364,11 +384,21 @@ if [ "$SERVICE" = grok ]; then
                --no-memory --max-turns "$MAXTURNS" --output-format json
                --debug --debug-file "$LOG/service-debug.log")
   grok --prompt-file "$RECIPE" "${GROK_COMMON[@]}" > "$LOG/service-out.json" 2> "$LOG/service-err.log" || true
+  # Rate-limit evidence comes from the CLI's stderr + debug stream and the envelope's
+  # stopReason/error fields — NOT the model's prose (.text): a zero-commit run whose
+  # SUMMARY merely discusses rate limits (common in reviews) used to trigger 3 pointless
+  # backoff-resumes here.
+  rl_detected() {
+    grep -qiE '429|too many requests|rate.?limit' "$LOG/service-err.log" "$LOG/service-debug.log" 2>/dev/null && return 0
+    has_cmd jq && jq -r '((.stopReason // "") + " " + (.error // "")) // empty' "$LOG/service-out.json" 2>/dev/null \
+      | grep -qiE '429|too many requests|rate.?limit' && return 0
+    return 1
+  }
   resume=0; max_resumes=3
   while :; do
     commits="$(git -C "$WORKTREE" rev-list --count "origin/$BASE..HEAD" 2>/dev/null || echo 0)"
     [ "${commits:-0}" -ge 1 ] && break                       # grok produced work -> proceed to the gate
-    if [ "$resume" -ge "$max_resumes" ] || ! grep -qiE '429|too many requests|rate.?limit' "$LOG/service-err.log" "$LOG/service-out.json" 2>/dev/null; then
+    if [ "$resume" -ge "$max_resumes" ] || ! rl_detected; then
       break                                                  # not rate-limited, or out of resume budget
     fi
     back=$(( 60 * (1 << resume) )); [ "$back" -gt 300 ] && back=300; back=$(( back + RANDOM % 25 ))
