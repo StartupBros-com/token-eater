@@ -44,12 +44,21 @@ cmd_create() {
 
   # keep the worktree dir AND the run-artifact dir out of the index (idempotent), so a
   # member's `git add .` can never stage worktrees or run artifacts (prompt/schema/result/
-  # gate logs under .token-eater/runs/) into a chore PR.
-  for ig in "$WORKTREE_SUBDIR/" ".token-eater/"; do
-    if ! { [ -f "$repo/.gitignore" ] && grep -qF "$ig" "$repo/.gitignore"; }; then
-      printf '%s\n' "$ig" >> "$repo/.gitignore" 2>/dev/null || true
-    fi
-  done
+  # gate logs under .token-eater/runs/) into a chore PR. Written to .git/info/exclude, NOT
+  # .gitignore: appending to .gitignore dirtied the member's working tree — a direct
+  # violation of "your checkout and uncommitted work are never touched". info/exclude lives
+  # in the shared git dir, so it covers the main checkout AND every worktree, invisibly.
+  local excl
+  excl="$(git -C "$repo" rev-parse --git-path info/exclude 2>/dev/null || true)"
+  case "$excl" in ''|/*) : ;; *) excl="$repo/$excl" ;; esac
+  if [ -n "$excl" ]; then
+    mkdir -p "$(dirname "$excl")" 2>/dev/null || true
+    for ig in "$WORKTREE_SUBDIR/" ".token-eater/"; do
+      if ! { [ -f "$excl" ] && grep -qxF "$ig" "$excl"; }; then
+        printf '%s\n' "$ig" >> "$excl" 2>/dev/null || true
+      fi
+    done
+  fi
 
   # branch from a COMMITTED ref (never the dirty working tree) so main is untouched
   with_lock "$repo" git -C "$repo" worktree add -q -b "$branch" "$wt" "$base" \
