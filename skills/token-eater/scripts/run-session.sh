@@ -193,6 +193,9 @@ if [ "$INSTALL_DEPS" = 1 ]; then
   _deps_ok=1
   [ -f "$WORKTREE/package.json" ] && [ ! -e "$WORKTREE/node_modules" ] && _deps_ok=0
   if { [ -f "$WORKTREE/uv.lock" ] || [ -f "$WORKTREE/poetry.lock" ]; } && [ ! -e "$WORKTREE/.venv" ] && [ ! -e "$WORKTREE/venv" ]; then _deps_ok=0; fi
+  # Ruby has a native verifier (bundle check); a Gemfile.lock repo whose bundler is missing or
+  # whose install failed must not be told "installed fresh" (pro-gate verify-round P2).
+  if [ -f "$WORKTREE/Gemfile.lock" ] && ! ( cd "$WORKTREE" && bundle check >/dev/null 2>&1 ); then _deps_ok=0; fi
   if [ "$_deps_ok" = 1 ]; then
     DEPS_NOTE="Project dependencies were installed fresh in this worktree."
   else
@@ -413,7 +416,11 @@ if [ "$SERVICE" = grok ]; then
   # backoff-resumes here.
   rl_detected() {
     grep -qiE '429|too many requests|rate.?limit' "$LOG/service-err.log" "$LOG/service-debug.log" 2>/dev/null && return 0
-    has_cmd jq && jq -r '((.stopReason // "") + " " + (.error // "")) // empty' "$LOG/service-out.json" 2>/dev/null \
+    # Strip any leading warning lines before jq (same normalization delegate-grok.sh applies —
+    # a prefixed envelope made jq fail and a real 429 in stopReason went undetected), and
+    # tostring the error so object-shaped errors match too.
+    has_cmd jq && awk 'f||/^[[:space:]]*\{/{f=1; print}' "$LOG/service-out.json" 2>/dev/null \
+      | jq -r '((.stopReason // "") + " " + ((.error // "") | tostring))' 2>/dev/null \
       | grep -qiE '429|too many requests|rate.?limit' && return 0
     return 1
   }

@@ -20,6 +20,13 @@ macOS). Two threads: make it **safe** for untrusted users, and make it **install
    so a repo's code never runs silently. `--install-deps` stays opt-in for the install-script RCE path.
    *(A network sandbox — `sandbox-exec`/`bwrap` — is a stronger future control; the trust gate is the v1
    because a default sandbox breaks legitimate gates that need fs/network.)*
+   **Scope of the v1 boundary (be explicit with members):** the service adapters (grok
+   `--always-approve`, claude `--allowedTools Bash`) and the gate itself all run an UNSANDBOXED
+   shell under the user's OS account — repo content that prompt-injects the service, or a model
+   mistake, can reach `$HOME`, credentials, and the network. `--trust-repo` consent covers exactly
+   this. The pro-gate verify-round review (2026-07-03) re-flagged it: an OS sandbox around the
+   service + gate is the **required hardening before distribution beyond trusted-repo use**, and
+   codex (`workspace-write`) already shows the target posture.
 - ✅ **Repo-derived strings validated.** `ORIGIN_SLUG` (owner/repo charset), `BASE`, `BRANCH` (git ref
    charset) are rejected if malformed before reaching `gh pr create` or the agent recipe.
 - ✅ **`.env` no longer copied** into the worktree (was exposing secrets to the autonomous service).

@@ -39,10 +39,11 @@ CB_REGEX='(usage limit|rate.?limit|429|All accounts are temporarily unavailable)
 # behavior deterministic on every host. Bash must be broad because the gate command is
 # repo-specific (pnpm/pytest/cargo/make/...), and running the target repo's own code under
 # the user's OS account is already token-eater's documented trust boundary (explicit
-# --trust-repo consent; grok runs --always-approve, codex workspace-write). This is still
-# strictly tighter than --dangerously-skip-permissions: no network tools, no MCP — only file
-# edits, Bash, skills, and subagents. OS-level sandboxing (bwrap/sandbox-exec) remains the
-# tracked future hardening (DISTRIBUTION-READINESS.md).
+# --trust-repo consent; grok runs --always-approve, codex workspace-write). This is tighter
+# than --dangerously-skip-permissions only in TOOL surface (no WebFetch/WebSearch/MCP) — Bash
+# itself can still reach the network and $HOME, exactly like grok's shell and the gate command.
+# That shared shell exposure IS the documented v1 trust boundary; OS-level sandboxing
+# (bwrap/sandbox-exec) remains the tracked pre-public hardening (DISTRIBUTION-READINESS.md).
 SCHEMA_ARGS=(); [ -n "$SCHEMA" ] && SCHEMA_ARGS=(--json-schema "$(cat "$SCHEMA")")
 set +e
 ( cd "$WT" && claude -p "$(cat "$PROMPT")" --output-format json ${SCHEMA_ARGS[@]+"${SCHEMA_ARGS[@]}"} \
