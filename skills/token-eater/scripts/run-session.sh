@@ -42,35 +42,24 @@ has_cmd() { command -v "$1" >/dev/null 2>&1; }
 # disables. Resolution mirrors run-gate.sh (macOS `timeout` lives in `gtimeout`).
 SESSION_TIMEOUT="${TOKEN_EATER_SESSION_TIMEOUT:-10800}"        # seconds (3h); 0 = disabled
 SESSION_TIMEOUT_KILL="${TOKEN_EATER_SESSION_TIMEOUT_KILL:-60}"  # grace before SIGKILL after the SIGTERM
-# te_timeout <cmd...> : wall-clock backstop. Runs <cmd> in its OWN process group and, at the deadline,
-# SIGTERMs then (after the grace) SIGKILLs the WHOLE group. The group-kill is the whole point: the
-# runaway this fence exists to reap is typically a wedged GRANDCHILD (a node/tsc GC death-spiral the
-# agent spawned) whose blocked event loop ignores SIGTERM. Plain `timeout -k` (and `setsid timeout`)
-# only signal the DIRECT child (verified on this fleet): when the agent CLI exits on SIGTERM its
-# wedged grandchild is orphaned to init and survives the follow-up SIGKILL, so the exact CPU-burner
-# lives on. Managing the process group explicitly via bash job control reaps the whole tree, and drops
-# the `timeout`/`gtimeout` dependency entirely (portable, incl. macOS bash 3.2 which lacks setsid).
-te_timed_out() { [ "$1" = 137 ] || [ "$1" = 143 ] || [ "$1" = 124 ]; }  # watchdog SIGKILL(137)/SIGTERM(143); 124 kept for any legacy `timeout` caller
+# te_timeout <cmd...> : wall-clock backstop. `timeout -k` SIGTERMs the service at the deadline, then
+# SIGKILLs it after the grace, so a service whose main loop ignores SIGTERM is still hard-stopped.
+# Deliberately the plain, battle-tested primitive, NOT a hand-rolled process-group watchdog: making a
+# watchdog correct needs a fired-sentinel (else an early external 124/137/143 exit hangs waiting on it)
+# AND an EXIT/INT/TERM cleanup trap (else its own `set -m` process group orphans the service when the
+# parent is killed) -- too much fragile machinery for the production bot's critical path, where a
+# mistake breaks NORMAL runs. Known narrow limitation: `timeout` signals the service and its group, but
+# a grandchild that BOTH ignores SIGTERM AND is orphaned into its own process group can survive; the
+# correct HARD fence for that is OS-level (a systemd `RuntimeMaxSec=` / cgroup on the token-eater unit)
+# -- tracked as a follow-up, and the same layer that fixed the analogous CI-runner wedge. In practice
+# token-eater's one long-running grandchild (the gate) already has its own timeout (run-gate.sh), so
+# the residual gap is small.
+te_timed_out() { [ "$1" = 124 ] || [ "$1" = 137 ]; }   # `timeout`: 124 = SIGTERM at the deadline, 137 = SIGKILL after --kill-after
 te_timeout() {
-  if [ "${SESSION_TIMEOUT:-0}" = 0 ]; then "$@"; return; fi
-  local rc=0 pid w
-  set -m                                                  # job control: the backgrounded job becomes its own process-group leader
-  { "$@"; } &
-  pid=$!
-  { sleep "$SESSION_TIMEOUT"      2>/dev/null || exit 0
-    kill -s TERM -- "-$pid" 2>/dev/null || true           # TERM the whole group at the deadline
-    sleep "$SESSION_TIMEOUT_KILL" 2>/dev/null || exit 0
-    kill -s KILL -- "-$pid" 2>/dev/null || true; } &      # hard-KILL the whole group after the grace
-  w=$!
-  set +m
-  wait "$pid" 2>/dev/null || rc=$?
-  if te_timed_out "$rc"; then
-    wait "$w" 2>/dev/null || true                         # timed out: let the watchdog finish its group TERM->KILL
-  else
-    kill -s TERM -- "-$w" 2>/dev/null || true             # finished on its own: cancel the watchdog (and its pending sleep)
-    wait "$w" 2>/dev/null || true
+  if   [ "${SESSION_TIMEOUT:-0}" != 0 ] && has_cmd timeout;  then timeout  -k "$SESSION_TIMEOUT_KILL" "$SESSION_TIMEOUT" "$@"
+  elif [ "${SESSION_TIMEOUT:-0}" != 0 ] && has_cmd gtimeout; then gtimeout -k "$SESSION_TIMEOUT_KILL" "$SESSION_TIMEOUT" "$@"
+  else "$@"
   fi
-  return "$rc"
 }
 
 # Install the project's deps INTO the worktree before the gate (OPT-IN via --install-deps). A fresh git
