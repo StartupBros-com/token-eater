@@ -32,6 +32,21 @@ REPO=""; SKILL=""; GATE=""; TARGET=""
 die() { echo "token-eater: $*" >&2; exit 2; }
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+# Runaway backstop. A token-eater session is UNATTENDED and holds a live shell + repo write on its
+# own credits; with no hard wall-clock ceiling a wedged service (a stuck agent loop, a tsc GC
+# death-spiral, a 429 backoff that never converges) can grind for HOURS burning credits and CPU
+# with zero forward progress (the exact failure class that left a CI runner's tsc pinned for ~18h).
+# So bound EVERY long-running service invocation with `timeout`. Deliberately generous: a real
+# session finishes well under this, so it only ever reaps a genuine runaway. Tune via env; 0
+# disables. Resolution mirrors run-gate.sh (macOS `timeout` lives in `gtimeout`).
+SESSION_TIMEOUT="${TOKEN_EATER_SESSION_TIMEOUT:-10800}"   # seconds (3h); 0 = disabled
+te_timeout() {   # te_timeout <cmd...> : run under the wall-clock backstop when enabled + available
+  if   [ "${SESSION_TIMEOUT:-0}" != 0 ] && has_cmd timeout;  then timeout  "$SESSION_TIMEOUT" "$@"
+  elif [ "${SESSION_TIMEOUT:-0}" != 0 ] && has_cmd gtimeout; then gtimeout "$SESSION_TIMEOUT" "$@"
+  else "$@"
+  fi
+}
+
 # Install the project's deps INTO the worktree before the gate (OPT-IN via --install-deps). A fresh git
 # worktree has the source but not the per-package node_modules a pnpm/yarn WORKSPACE needs (e.g.
 # better-sqlite3 under apps/cockpit), and non-Node stacks need their own fetch. SECURITY: package
@@ -409,7 +424,7 @@ if [ "$SERVICE" = grok ]; then
   GROK_COMMON=(--cwd "$WORKTREE" --rules "$GROK_RULES" --always-approve --disable-web-search
                --no-memory --max-turns "$MAXTURNS" --output-format json
                --debug --debug-file "$LOG/service-debug.log")
-  grok --prompt-file "$RECIPE" "${GROK_COMMON[@]}" > "$LOG/service-out.json" 2> "$LOG/service-err.log" || true
+  te_timeout grok --prompt-file "$RECIPE" "${GROK_COMMON[@]}" > "$LOG/service-out.json" 2> "$LOG/service-err.log" || true
   # Rate-limit evidence comes from the CLI's stderr + debug stream and the envelope's
   # stopReason/error fields — NOT the model's prose (.text): a zero-commit run whose
   # SUMMARY merely discusses rate limits (common in reviews) used to trigger 3 pointless
@@ -435,7 +450,7 @@ if [ "$SERVICE" = grok ]; then
     gentle=""; [ "$resume" -ge 1 ] && gentle="--no-subagents"   # escalate gentleness after the 1st resume
     echo "  rate-limited with no progress; backing off ${back}s then resuming (resume $((resume+1))/$max_resumes${gentle:+ $gentle})"
     sleep "$back"
-    grok --continue "${GROK_COMMON[@]}" $gentle \
+    te_timeout grok --continue "${GROK_COMMON[@]}" $gentle \
          -p "Continue this token-eater session where you left off. You were rate-limited (429). Proceed gently: run any subagents ONE AT A TIME, and on a 429 sleep and retry rather than giving up. Finish the procedure - keep the gate green, review-and-fix, then open the DRAFT PR." \
          >> "$LOG/service-out.json" 2>> "$LOG/service-err.log" || true
     resume=$(( resume + 1 ))
@@ -445,7 +460,7 @@ if [ "$SERVICE" = grok ]; then
   [ "$resume" -gt 0 ] && echo "  (resumed $resume time/s through rate-limit backoff)"
 else
   # codex / claude: delegate via their runner (single rich prompt; agentic loop inside)
-  bash "$HERE/delegate-$SERVICE.sh" "$WORKTREE" "$RECIPE" > "$LOG/service-out.json" 2> "$LOG/service-err.log" || INVOKE_OK=0
+  te_timeout bash "$HERE/delegate-$SERVICE.sh" "$WORKTREE" "$RECIPE" > "$LOG/service-out.json" 2> "$LOG/service-err.log" || INVOKE_OK=0
 fi
 echo "  $SERVICE finished (invoke_ok=$INVOKE_OK); logs in $LOG/"
 
