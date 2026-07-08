@@ -21,7 +21,8 @@
 # Exit: 0 = draft PR opened and gate verified green
 #       2 = bad usage / preflight failure (no changes made)
 #       3 = baseline gate RED (refused to run; nothing attempted)
-#       4 = service ran but the final gate is RED (worktree kept for inspection, NO PR)
+#       4 = service ran but the final gate is RED, OR it hit the wall-clock backstop mid-run
+#           (worktree kept for inspection, NO PR)
 #       5 = gate green but no PR could be opened (branch kept; see log)
 set -euo pipefail
 
@@ -50,6 +51,7 @@ te_timeout() {   # te_timeout <cmd...> : wall-clock backstop; SIGTERM at the dea
   else "$@"
   fi
 }
+te_timed_out() { [ "$1" = 124 ] || [ "$1" = 137 ]; }   # `timeout` exit codes: 124 = SIGTERM at the deadline, 137 = SIGKILL after --kill-after
 
 # Install the project's deps INTO the worktree before the gate (OPT-IN via --install-deps). A fresh git
 # worktree has the source but not the per-package node_modules a pnpm/yarn WORKSPACE needs (e.g.
@@ -418,7 +420,7 @@ fi
 #    instead of backing off. This rule caps concurrency and forces backoff+retry over downgrade.
 GROK_RULES="Rate-limit discipline (this account may 429 under load). $CONCURRENCY If ANY tool or subagent call returns 429 / 'Too Many Requests' / 'rate limit', do NOT abandon it and do NOT silently downgrade to a weaker subagent type: back off via the shell (sleep 30s, then 60s, then 120s) and retry the SAME call up to 3 times. Only give up after 3 failed retries, and say so explicitly in your summary."
 echo "-- launching $SERVICE (this is the long-running part; it burns $SERVICE credits) --"
-INVOKE_OK=1
+INVOKE_OK=1; SERVICE_TIMED_OUT=0
 if [ "$SERVICE" = grok ]; then
   # token-eater-OWNED rate-limit resilience (do NOT rely on grok self-policing - it is unreliable):
   # launch grok; if it makes NO progress (zero commits) AND the logs show rate-limiting, deterministically
@@ -428,7 +430,8 @@ if [ "$SERVICE" = grok ]; then
   GROK_COMMON=(--cwd "$WORKTREE" --rules "$GROK_RULES" --always-approve --disable-web-search
                --no-memory --max-turns "$MAXTURNS" --output-format json
                --debug --debug-file "$LOG/service-debug.log")
-  te_timeout grok --prompt-file "$RECIPE" "${GROK_COMMON[@]}" > "$LOG/service-out.json" 2> "$LOG/service-err.log" || true
+  _rc=0; te_timeout grok --prompt-file "$RECIPE" "${GROK_COMMON[@]}" > "$LOG/service-out.json" 2> "$LOG/service-err.log" || _rc=$?
+  te_timed_out "$_rc" && SERVICE_TIMED_OUT=1
   # Rate-limit evidence comes from the CLI's stderr + debug stream and the envelope's
   # stopReason/error fields — NOT the model's prose (.text): a zero-commit run whose
   # SUMMARY merely discusses rate limits (common in reviews) used to trigger 3 pointless
@@ -454,9 +457,10 @@ if [ "$SERVICE" = grok ]; then
     gentle=""; [ "$resume" -ge 1 ] && gentle="--no-subagents"   # escalate gentleness after the 1st resume
     echo "  rate-limited with no progress; backing off ${back}s then resuming (resume $((resume+1))/$max_resumes${gentle:+ $gentle})"
     sleep "$back"
-    te_timeout grok --continue "${GROK_COMMON[@]}" $gentle \
+    _rc=0; te_timeout grok --continue "${GROK_COMMON[@]}" $gentle \
          -p "Continue this token-eater session where you left off. You were rate-limited (429). Proceed gently: run any subagents ONE AT A TIME, and on a 429 sleep and retry rather than giving up. Finish the procedure - keep the gate green, review-and-fix, then open the DRAFT PR." \
-         >> "$LOG/service-out.json" 2>> "$LOG/service-err.log" || true
+         >> "$LOG/service-out.json" 2>> "$LOG/service-err.log" || _rc=$?
+    te_timed_out "$_rc" && { SERVICE_TIMED_OUT=1; break; }   # backstop fired mid-resume: stop, do not keep resuming a killed session
     resume=$(( resume + 1 ))
   done
   commits="$(git -C "$WORKTREE" rev-list --count "origin/$BASE..HEAD" 2>/dev/null || echo 0)"
@@ -464,9 +468,21 @@ if [ "$SERVICE" = grok ]; then
   [ "$resume" -gt 0 ] && echo "  (resumed $resume time/s through rate-limit backoff)"
 else
   # codex / claude: delegate via their runner (single rich prompt; agentic loop inside)
-  te_timeout bash "$HERE/delegate-$SERVICE.sh" "$WORKTREE" "$RECIPE" > "$LOG/service-out.json" 2> "$LOG/service-err.log" || INVOKE_OK=0
+  _rc=0; te_timeout bash "$HERE/delegate-$SERVICE.sh" "$WORKTREE" "$RECIPE" > "$LOG/service-out.json" 2> "$LOG/service-err.log" || _rc=$?
+  [ "$_rc" -ne 0 ] && INVOKE_OK=0
+  te_timed_out "$_rc" && SERVICE_TIMED_OUT=1
 fi
-echo "  $SERVICE finished (invoke_ok=$INVOKE_OK); logs in $LOG/"
+echo "  $SERVICE finished (invoke_ok=$INVOKE_OK, timed_out=$SERVICE_TIMED_OUT); logs in $LOG/"
+
+# The wall-clock backstop killing the service mid-run is a FAILURE, not a completion: it may have
+# committed partial work but never reached self-review / push / PR-body. Refuse to publish it (even
+# if the gate happens to pass on the partial commits) and keep the worktree for inspection, matching
+# the gate-RED outcome below. Without this, a timed-out-after-commit run would fall through to the
+# COMMITS>=1 PR-open path, which never re-checks the invocation's success (pro-gate #28 P1).
+if [ "${SERVICE_TIMED_OUT:-0}" = 1 ]; then
+  echo "token-eater: $SERVICE hit the wall-clock backstop (>${SESSION_TIMEOUT}s) and was killed before finishing - NOT opening a PR from a partial, unreviewed session. Worktree kept for inspection: $WORKTREE" >&2
+  exit 4
+fi
 
 # 6. INDEPENDENT VERIFICATION - never trust the service's self-report; re-run the gate ourselves.
 #    Soft tier has no deterministic gate to re-run; the AI review + draft PR + banner are the net.
