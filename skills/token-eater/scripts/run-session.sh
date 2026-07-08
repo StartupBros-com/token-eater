@@ -40,9 +40,13 @@ has_cmd() { command -v "$1" >/dev/null 2>&1; }
 # session finishes well under this, so it only ever reaps a genuine runaway. Tune via env; 0
 # disables. Resolution mirrors run-gate.sh (macOS `timeout` lives in `gtimeout`).
 SESSION_TIMEOUT="${TOKEN_EATER_SESSION_TIMEOUT:-10800}"   # seconds (3h); 0 = disabled
-te_timeout() {   # te_timeout <cmd...> : run under the wall-clock backstop when enabled + available
-  if   [ "${SESSION_TIMEOUT:-0}" != 0 ] && has_cmd timeout;  then timeout  "$SESSION_TIMEOUT" "$@"
-  elif [ "${SESSION_TIMEOUT:-0}" != 0 ] && has_cmd gtimeout; then gtimeout "$SESSION_TIMEOUT" "$@"
+SESSION_TIMEOUT_KILL="${TOKEN_EATER_SESSION_TIMEOUT_KILL:-60}"  # SIGKILL grace after the SIGTERM
+te_timeout() {   # te_timeout <cmd...> : wall-clock backstop; SIGTERM at the deadline, SIGKILL after the grace.
+  # -k matters here specifically: the runaway this fence exists to reap (a node/tsc GC death-spiral)
+  # has a blocked event loop and will NOT process a plain SIGTERM, so without a SIGKILL follow-up the
+  # backstop could "fire" yet leave the wedged process alive. --kill-after guarantees the hard stop.
+  if   [ "${SESSION_TIMEOUT:-0}" != 0 ] && has_cmd timeout;  then timeout  -k "$SESSION_TIMEOUT_KILL" "$SESSION_TIMEOUT" "$@"
+  elif [ "${SESSION_TIMEOUT:-0}" != 0 ] && has_cmd gtimeout; then gtimeout -k "$SESSION_TIMEOUT_KILL" "$SESSION_TIMEOUT" "$@"
   else "$@"
   fi
 }
