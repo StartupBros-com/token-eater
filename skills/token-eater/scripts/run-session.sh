@@ -448,6 +448,11 @@ if [ "$SERVICE" = grok ]; then
   }
   resume=0; max_resumes=3
   while :; do
+    # If the backstop already fired (initial launch, or a prior resume), stop here: a timeout-killed
+    # session is classified failed and will exit 4 below, so never spend another multi-hour timeout
+    # window on `grok --continue` (a killed run can leave 429 evidence that would otherwise trigger
+    # up to max_resumes more launches). pro-gate #28 round-2 P1.
+    [ "${SERVICE_TIMED_OUT:-0}" = 1 ] && break
     commits="$(git -C "$WORKTREE" rev-list --count "origin/$BASE..HEAD" 2>/dev/null || echo 0)"
     [ "${commits:-0}" -ge 1 ] && break                       # grok produced work -> proceed to the gate
     if [ "$resume" -ge "$max_resumes" ] || ! rl_detected; then
@@ -460,7 +465,7 @@ if [ "$SERVICE" = grok ]; then
     _rc=0; te_timeout grok --continue "${GROK_COMMON[@]}" $gentle \
          -p "Continue this token-eater session where you left off. You were rate-limited (429). Proceed gently: run any subagents ONE AT A TIME, and on a 429 sleep and retry rather than giving up. Finish the procedure - keep the gate green, review-and-fix, then open the DRAFT PR." \
          >> "$LOG/service-out.json" 2>> "$LOG/service-err.log" || _rc=$?
-    te_timed_out "$_rc" && { SERVICE_TIMED_OUT=1; break; }   # backstop fired mid-resume: stop, do not keep resuming a killed session
+    te_timed_out "$_rc" && SERVICE_TIMED_OUT=1   # the loop-head guard above breaks before another resume
     resume=$(( resume + 1 ))
   done
   commits="$(git -C "$WORKTREE" rev-list --count "origin/$BASE..HEAD" 2>/dev/null || echo 0)"
