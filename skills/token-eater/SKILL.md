@@ -56,7 +56,7 @@ When there's no saved config (`references/setup-and-config.md`) and no `$ARGUMEN
 
 Before any shell command, explain plainly that token-eater will run this project's own checks and that
 the isolated worktree is not a security sandbox: project code can access the member's files, credentials,
-and network. Ask whether to continue. Only after an explicit yes, pass `--trust-repo`. The engine stores
+and network. Ask whether to continue. Only after an explicit yes, pass `--trust-repo-caveat 1`. The engine stores
 versioned consent outside the project, keyed by its canonical path. The same caveat version asks nothing
 later; a version bump asks again. Never infer consent from `./.token-eater.yaml` or any tracked project
 file. Persist only `{services, task}` to `./.token-eater.yaml`.
@@ -81,8 +81,9 @@ Plain-language task → skill mapping:
 ### Later runs (already configured) → zero questions
 
 If `./.token-eater.yaml` (or user config) already has `{services, task}`, just run with them — no
-questions. The engine's per-repo trust cache means `--trust-repo` is already remembered too. The
-member types `/token-eater`, you run, you report. To change the saved choices later they can run
+questions. The engine's per-repo trust cache means no affirmation flag is needed while caveat version 1
+remains recorded. If the caveat version changes, show the new text and pass that exact new version only
+after another explicit yes. The member types `/token-eater`, you run, you report. To change the saved choices later they can run
 `/token-eater setup`.
 
 ### Power-user arguments (optional — for someone who knows the tokens)
@@ -114,11 +115,12 @@ A token-eater run is **one session**: one service, one skill, one polished draft
    ```bash
    bash <skill-dir>/scripts/run-session.sh \
      --repo <project-path> --service <service> --skill <skill-name> \
-     --rounds 2 --trust-repo [--gate "<override>"] [--install-deps] [--pace gentle|thorough] [--target "<hint>"]
+     --rounds 2 --trust-repo-caveat 1 [--gate "<override>"] [--install-deps] [--pace gentle|thorough] [--target "<hint>"]
    ```
 
-   **You pass these flags, not the member.** `--trust-repo` is justified by the member's interactive
-   choice to run (and the engine caches it per repo); pass `--install-deps` only if the member opted
+   **You pass these flags, not the member.** `--trust-repo-caveat 1` is justified only by the member's
+   explicit acceptance of caveat version 1 just shown (the engine caches that version per repo); pass
+   `--install-deps` only if the member opted
    into it (don't, by default). `--gate` is optional (auto-detected — step 2). Add `--dry-run` to
    render the recipe and stop. The service then runs the whole loop (skill -> gate -> review + fix, up
    to `--rounds` rounds -> push -> draft PR) on its own credits — the review uses the real
@@ -131,7 +133,7 @@ A token-eater run is **one session**: one service, one skill, one polished draft
 
 - Never auto-merge AND never auto-mark-ready — work lands as a **draft PR**; the final review and merge are always yours.
 - **Prefer a deterministic gate; degrade transparently when there isn't one.** Tier A/B run the project's real check and the result is re-verified independently. Tier C (no gate) still runs but is clearly flagged on the PR as AI-reviewed-only — never presented as machine-verified.
-- **Trust boundary (enforced):** token-eater runs *the target repo's own code* on your machine — its gate command (e.g. `pnpm test`), and, with `--install-deps`, its dependency install/lifecycle scripts. So it **refuses to run a repo's code without `--trust-repo`** (remembered per repo after the first time). Dependency install is additionally OFF by default. Repo-derived strings (`origin` slug, base/branch) are validated before reaching `gh`/the recipe, and the target repo's `.env` is never copied into the worktree.
+- **Trust boundary (enforced):** token-eater runs *the target repo's own code* on your machine — its gate command (e.g. `pnpm test`), and, with `--install-deps`, its dependency install/lifecycle scripts. So it **refuses to run a repo's code without `--trust-repo-caveat 1`** (remembered per repo after the first time). Dependency install is additionally OFF by default. Repo-derived strings (`origin` slug, base/branch) are validated before reaching `gh`/the recipe, and the target repo's `.env` is never copied into the worktree.
 - token-eater's gate is re-run **independently** after the service finishes — the service's self-report is never trusted for keep/ship.
 - token-eater only spends the service you named (or your saved default).
 - All work happens in a fresh worktree branched from `origin/main`; your checkout and uncommitted work are never touched. A red final gate means no PR.

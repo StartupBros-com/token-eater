@@ -11,31 +11,21 @@ concurrency:
 
 jobs:
   check:
-    name: trusted check
-    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.repo.fork == false)
-    runs-on: [self-hosted, ci]
+    name: check
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
       - name: Provision pinned CI tools
         run: ./scripts/provision-ci-tools.sh
 
-      - name: Validate JSON files
-        run: |
-          set -euo pipefail
-          find . -path './.git' -prune -o -name '*.json' -print | while read -r f; do
-            echo "checking $f"
-            jq empty "$f"
-          done
-
-      - name: Validate YAML files
-        run: |
-          set -euo pipefail
-          find . -path './.git' -prune -o \( -name '*.yaml' -o -name '*.yml' \) -print | while read -r f; do
-            echo "checking $f"
-            yq eval '.' "$f" > /dev/null
-          done
+      - name: Validate data files
+        run: ./scripts/validate-data.sh
 
       - name: Shellcheck
         run: |
@@ -47,19 +37,4 @@ jobs:
         run: |
           bash tests/consent-preflight.sh
           bash tests/release-train.test.sh
-
-  public-pr-check:
-    name: public PR data check
-    if: github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.head.repo.fork != false)
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout untrusted pull request
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
-        with:
-          persist-credentials: false
-      - name: Validate data files without secrets
-        run: |
-          find . -path './.git' -prune -o -name '*.json' -print -exec jq empty {} \;
-          find . -path './.git' -prune -o \( -name '*.yaml' -o -name '*.yml' \) -print -exec yq eval '.' {} \; >/dev/null
+          bash tests/workflows.test.sh

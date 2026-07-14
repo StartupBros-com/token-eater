@@ -14,7 +14,7 @@ concurrency:
 jobs:
   promote:
     if: github.event.release.draft == false
-    runs-on: [self-hosted, ci]
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out release commit
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
@@ -38,13 +38,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          latest_id="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '[.[] | select(.draft == false and .prerelease == false)] | sort_by(.created_at) | reverse | first | .id')"
+          latest_id="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            | ./scripts/latest-stable-release-id.sh)"
           test -n "$latest_id"
           echo "id=$latest_id" >> "$GITHUB_OUTPUT"
 
       - name: Check out marketplace
-        if: github.event.action == 'published' && github.event.release.prerelease == false
+        if: github.event.release.prerelease == false
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
         with:
           repository: StartupBros-com/hov-marketplace

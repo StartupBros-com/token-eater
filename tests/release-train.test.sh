@@ -83,10 +83,33 @@ assert_eq "$(wc -l < "$TMP/curl.log")" 2 'older release no-op does not announce'
 env "${common[@]}" RELEASE_ID=102 LATEST_STABLE_ID=102 RELEASE_PRERELEASE=true "$ROOT/scripts/release-train.sh" >/dev/null
 assert_eq "$(wc -l < "$TMP/curl.log")" 2 'prerelease is ignored'
 
-env "${common[@]}" EVENT_ACTION=edited MARKETPLACE_DIR= "$ROOT/scripts/release-train.sh" >/dev/null
-assert_eq "$(wc -l < "$TMP/curl.log")" 3 'edited release announces without promotion'
+assert_eq "$(git -C "$TMP/marketplace" config user.name)" hov-release-bot 'promotion configures repo-local bot name'
+assert_eq "$(git -C "$TMP/marketplace" config user.email)" hov-release-bot@users.noreply.github.com 'promotion configures repo-local bot email'
 
-env "${common[@]}" EVENT_ACTION=edited RELEASE_PRERELEASE=true MARKETPLACE_DIR= "$ROOT/scripts/release-train.sh" >/dev/null
-assert_eq "$(wc -l < "$TMP/curl.log")" 3 'edited prerelease remains production no-op'
+env "${common[@]}" EVENT_ACTION=edited "$ROOT/scripts/release-train.sh" >/dev/null
+assert_eq "$(wc -l < "$TMP/curl.log")" 3 'edited release announces when marketplace exactly matches'
+
+corrupt="$TMP/corrupt"
+git clone -q "$TMP/marketplace.git" "$corrupt"
+git -C "$corrupt" config user.email test@example.com
+git -C "$corrupt" config user.name Test
+jq '(.plugins[] | select(.name == "token-eater") | .source.sha) = "2222222222222222222222222222222222222222"' \
+  "$corrupt/.claude-plugin/marketplace.json" > "$corrupt/marketplace.tmp"
+mv "$corrupt/marketplace.tmp" "$corrupt/.claude-plugin/marketplace.json"
+git -C "$corrupt" add .claude-plugin/marketplace.json
+git -C "$corrupt" commit -qm 'corrupt immutable promotion tuple'
+git -C "$corrupt" push -q origin HEAD:main
+if env "${common[@]}" EVENT_ACTION=edited "$ROOT/scripts/release-train.sh" >/dev/null 2>&1; then
+  fail 'edited release repairs immutable drift under the same release ID'
+fi
+assert_eq "$(wc -l < "$TMP/curl.log")" 3 'same-ID drift fails closed without announcement'
+
+RACE_ON_FIRST_PUSH=0
+env "${common[@]}" EVENT_ACTION=edited RELEASE_ID=102 LATEST_STABLE_ID=102 "$ROOT/scripts/release-train.sh" >/dev/null
+assert_eq "$(wc -l < "$TMP/curl.log")" 4 'newly stable edited release promotes and announces once'
+assert_eq "$(jq -r '.plugins[] | select(.name=="token-eater") | .metadata.releaseId' "$TMP/marketplace/.claude-plugin/marketplace.json")" 102 'newly stable edited release advances marketplace'
+
+env "${common[@]}" EVENT_ACTION=edited RELEASE_PRERELEASE=true "$ROOT/scripts/release-train.sh" >/dev/null
+assert_eq "$(wc -l < "$TMP/curl.log")" 4 'edited prerelease remains production no-op'
 
 echo 'ALL PASS'

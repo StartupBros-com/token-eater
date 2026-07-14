@@ -17,8 +17,9 @@ they never type a flag. Ask only what isn't already known:
    that is, silently). Plain wording: "Claude / Grok / Codex credits". → saved as `services`.
 
 Before any shell command, present the informed-consent caveat from `SKILL.md` and ask whether to
-continue. Only an explicit yes permits `--trust-repo`. The engine records that consent outside the
-repository, keyed by canonical path and caveat version. Project config never counts as consent.
+continue. Only an explicit yes permits `--trust-repo-caveat 1`, where `1` is the exact caveat version
+just shown. Never reuse an affirmation after that version changes. The engine records consent outside
+the repository, keyed by canonical path and caveat version. Project config never counts as consent.
 
 After consent, offer only services that `scripts/detect-adapters.sh` reports `available`. **Save the
 answers to `./.token-eater.yaml`** and continue the run.

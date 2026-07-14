@@ -32,19 +32,25 @@ grep -q 'not an OS security sandbox' "$TMP/err"
 assert_fails run 1 0
 [ ! -e "$CONSENT" ]
 
-# Explicit consent records canonical path outside the target repository.
+# Affirmation must name the exact caveat version that was shown.
+assert_fails run 1 0
+assert_fails run 1 2
+[ ! -e "$CONSENT" ]
+
+# Explicit version-bound consent records canonical path outside the target repository.
 CANON="$(run 1 1)"
 [ "$CANON" = "$(cd -P "$REPO" && pwd -P)" ]
 grep -q "^1${TAB:-$(printf '\t')}$CANON$" "$CONSENT"
 [ ! -e "$REPO/.config/token-eater/consent-v1.tsv" ]
 
 # Same path and caveat version asks nothing and succeeds without affirmation.
-[ "$(run 1 0)" = "$CANON" ]
+[ "$(run 1 '')" = "$CANON" ]
 
-# A caveat version bump re-prompts and does not accept the prior record.
-assert_fails run 2 0
+# A caveat version bump re-prompts and cannot consume affirmation for the old version.
+assert_fails run 2 ''
 grep -q 'caveat version 2' "$TMP/err"
-[ "$(run 2 1)" = "$CANON" ]
+assert_fails run 2 1
+[ "$(run 2 2)" = "$CANON" ]
 
 grep -q "^2${TAB:-$(printf '\t')}$CANON$" "$CONSENT"
 printf 'consent-preflight: PASS\n'

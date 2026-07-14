@@ -4,7 +4,7 @@ set -euo pipefail
 
 CAVEAT_VERSION="${TOKEN_EATER_CAVEAT_VERSION:-1}"
 REPO="${1:-}"
-AFFIRM="${2:-0}"
+AFFIRMED_CAVEAT_VERSION="${2:-}"
 
 fail() { printf 'token-eater: %s\n' "$*" >&2; exit 2; }
 
@@ -40,8 +40,8 @@ printf '%s\n' \
   "files, credentials, and network. Continue only if you trust this repository:" \
   "$REPO_PATH" >&2
 
-if [ "$AFFIRM" != 1 ]; then
-  fail "consent required. After the operator accepts this caveat, re-run with --trust-repo. Consent is stored outside the repository and this caveat will be shown again when its version changes."
+if [ "$AFFIRMED_CAVEAT_VERSION" != "$CAVEAT_VERSION" ]; then
+  fail "consent required for caveat version $CAVEAT_VERSION. After the operator accepts the displayed caveat, re-run with --trust-repo-caveat $CAVEAT_VERSION. Consent is stored outside the repository and this caveat will be shown again when its version changes."
 fi
 
 # External filesystem commands are permitted only after the caveat has been presented and affirmed.

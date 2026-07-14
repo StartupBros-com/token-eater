@@ -27,7 +27,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SERVICE=grok; ROUNDS=2; SLUG=session; MAXTURNS=150; DRYRUN=0; PACE=thorough; INSTALL_DEPS=0; TRUST_REPO=0
+SERVICE=grok; ROUNDS=2; SLUG=session; MAXTURNS=150; DRYRUN=0; PACE=thorough; INSTALL_DEPS=0; TRUST_REPO_CAVEAT=
 REPO=""; SKILL=""; GATE=""; TARGET=""
 
 die() { echo "token-eater: $*" >&2; exit 2; }
@@ -107,7 +107,8 @@ while [ "$#" -gt 0 ]; do
     --max-turns) MAXTURNS="$2"; shift 2;;
     --pace) PACE="$2"; shift 2;;
     --install-deps) INSTALL_DEPS=1; shift;;
-    --trust-repo) TRUST_REPO=1; shift;;
+    --trust-repo-caveat) TRUST_REPO_CAVEAT="$2"; shift 2;;
+    --trust-repo) die "--trust-repo no longer binds consent to the displayed caveat; use --trust-repo-caveat <version>";;
     --dry-run) DRYRUN=1; shift;;
     *) die "unknown arg: $1";;
   esac
@@ -117,7 +118,7 @@ done
 # CONSENT PREFLIGHT MUST BE FIRST. It runs before git, service detection, auth, fetch, gates, or any
 # other target-repository command. Consent is operator-global, keyed by this physical repository path,
 # and versioned in consent-preflight.sh. A tracked file inside the target repository is never trusted.
-REPO="$(bash "$HERE/consent-preflight.sh" "$REPO" "$TRUST_REPO")" || exit $?
+REPO="$(bash "$HERE/consent-preflight.sh" "$REPO" "$TRUST_REPO_CAVEAT")" || exit $?
 
 # Target selection belongs on the service, not here: most maintenance skills (de-monolithize's
 # census, dead-code's gate scan, etc.) find their own targets via subagents. Pass --target only as
