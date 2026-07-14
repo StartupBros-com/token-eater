@@ -41,7 +41,7 @@ macOS). Two threads: make it **safe** for untrusted users, and make it **install
 
 ## Open — DELIVERY (makes it installable by a member)
 
-The HoV app (`~/SITES/prbot/apps/startupbros`) is course/challenge/vault-based with **no skill-install
+The House of Vibe app is course/challenge/vault-based with **no skill-install
 mechanism yet**. Needs a design:
 - Bundle format + install path into `~/.claude/skills/` (and how members run `/token-eater`).
 - Versioning / updates.

@@ -25,7 +25,7 @@ Read these from setup/config before installing:
 For examples below, assume:
 
 ```text
-repo: /home/will/SITES/example-app
+repo: /home/<username>/projects/example-app
 time: 03:00 local time daily
 command: claude -p "/token-eater run"
 id: token-eater
@@ -70,7 +70,7 @@ Description=token-eater harvest run
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/will/SITES/example-app
+WorkingDirectory=/home/<username>/projects/example-app
 ExecStart=/usr/bin/env bash -lc 'claude -p "/token-eater run"'
 ```
 
@@ -127,13 +127,13 @@ Use cron when systemd user timers are unavailable. Cron does not understand toke
 Example daily 03:00 cron line:
 
 ```cron
-0 3 * * * cd /home/will/SITES/example-app && /usr/bin/env bash -lc 'claude -p "/token-eater run"' >> "$HOME/.token-eater/cron.log" 2>&1 # token-eater
+0 3 * * * cd /home/<username>/projects/example-app && /usr/bin/env bash -lc 'claude -p "/token-eater run"' >> "$HOME/.token-eater/cron.log" 2>&1 # token-eater
 ```
 
 Install without clobbering existing crontab entries:
 
 ```bash
-(crontab -l 2>/dev/null | grep -v '# token-eater$'; printf '%s\n' '0 3 * * * cd /home/will/SITES/example-app && /usr/bin/env bash -lc '\''claude -p "/token-eater run"'\'' >> "$HOME/.token-eater/cron.log" 2>&1 # token-eater') | crontab -
+(crontab -l 2>/dev/null | grep -v '# token-eater$'; printf '%s\n' '0 3 * * * cd /home/<username>/projects/example-app && /usr/bin/env bash -lc '\''claude -p "/token-eater run"'\'' >> "$HOME/.token-eater/cron.log" 2>&1 # token-eater') | crontab -
 ```
 
 Uninstall:
@@ -167,7 +167,7 @@ Example plist for daily 03:00:
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>cd /Users/will/SITES/example-app &amp;&amp; claude -p &quot;/token-eater run&quot;</string>
+    <string>cd /Users/<username>/projects/example-app &amp;&amp; claude -p &quot;/token-eater run&quot;</string>
   </array>
   <key>StartCalendarInterval</key>
   <dict>
@@ -177,9 +177,9 @@ Example plist for daily 03:00:
     <integer>0</integer>
   </dict>
   <key>StandardOutPath</key>
-  <string>/Users/will/.token-eater/launchd.out.log</string>
+  <string>/Users/<username>/.token-eater/launchd.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/will/.token-eater/launchd.err.log</string>
+  <string>/Users/<username>/.token-eater/launchd.err.log</string>
 </dict>
 </plist>
 ```
@@ -217,13 +217,13 @@ Record `native_id: launchd:com.token-eater.harvest`.
 Use the same cron pattern as Linux, with macOS paths:
 
 ```cron
-0 3 * * * cd /Users/will/SITES/example-app && /bin/bash -lc 'claude -p "/token-eater run"' >> "$HOME/.token-eater/cron.log" 2>&1 # token-eater
+0 3 * * * cd /Users/<username>/projects/example-app && /bin/bash -lc 'claude -p "/token-eater run"' >> "$HOME/.token-eater/cron.log" 2>&1 # token-eater
 ```
 
 Install:
 
 ```bash
-(crontab -l 2>/dev/null | grep -v '# token-eater$'; printf '%s\n' '0 3 * * * cd /Users/will/SITES/example-app && /bin/bash -lc '\''claude -p "/token-eater run"'\'' >> "$HOME/.token-eater/cron.log" 2>&1 # token-eater') | crontab -
+(crontab -l 2>/dev/null | grep -v '# token-eater$'; printf '%s\n' '0 3 * * * cd /Users/<username>/projects/example-app && /bin/bash -lc '\''claude -p "/token-eater run"'\'' >> "$HOME/.token-eater/cron.log" 2>&1 # token-eater') | crontab -
 ```
 
 Uninstall:

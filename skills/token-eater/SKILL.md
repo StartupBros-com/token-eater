@@ -17,10 +17,13 @@ Want to burn expiring Grok credits? `/token-eater grok`. It spends only the serv
 
 **Skill files resolve from THIS skill's base directory, not the user's project.** Every `scripts/...`, `references/...`, and `skills-catalog.yaml` path below is relative to the directory this `SKILL.md` lives in. Invoke scripts by their absolute path — e.g. `bash <skill-dir>/scripts/run-session.sh ...`. The *work* runs in the user's project (a worktree of it); the *tooling* lives with the skill.
 
-**Codex on Windows:** when this skill is surfaced through `C:/Users/will/.agents/skills/token-eater`,
-run the shell tooling through WSL, not native Windows path syntax. Prefer this live WSL skill directory
-`/home/will/SITES/token-eater/skills/token-eater` and invoke scripts via `wsl -e bash -lc 'bash /home/will/SITES/token-eater/skills/token-eater/scripts/run-session.sh ...'`.
-If you must use the Windows copy, translate it to `/mnt/c/Users/will/.agents/skills/token-eater` before passing it to bash.
+**Codex on Windows:** when this skill is surfaced through `C:/Users/<username>/.agents/skills/token-eater`,
+run the shell tooling through WSL, not native Windows path syntax. Prefer the installed WSL skill directory,
+for example `$HOME/.claude/skills/token-eater`, and invoke scripts with a translated Linux path via
+`wsl -e bash -lc 'bash "$HOME/.claude/skills/token-eater/scripts/run-session.sh" ...'`. If you must use
+the Windows copy, translate it to `/mnt/c/Users/<username>/.agents/skills/token-eater` before passing it
+to bash. WSL is a compatibility layer, not a security sandbox. The target repository's code still runs
+with the files, credentials, and network access available to your WSL user.
 
 ## Status
 
@@ -51,9 +54,12 @@ When there's no saved config (`references/setup-and-config.md`) and no `$ARGUMEN
 2. **"Which credits should I use?"** — only if more than one service is signed in; otherwise pick the
    one that is, silently. Phrase as "Claude / Grok / Codex credits", not "service".
 
-The member's choice to run IS their consent to run their project's own checks, so pass `--trust-repo`
-on this first run (the engine then remembers it). Don't ask a separate "do you trust this repo?"
-question — that's jargon. Persist `{services, task}` to `./.token-eater.yaml`.
+Before any shell command, explain plainly that token-eater will run this project's own checks and that
+the isolated worktree is not a security sandbox: project code can access the member's files, credentials,
+and network. Ask whether to continue. Only after an explicit yes, pass `--trust-repo`. The engine stores
+versioned consent outside the project, keyed by its canonical path. The same caveat version asks nothing
+later; a version bump asks again. Never infer consent from `./.token-eater.yaml` or any tracked project
+file. Persist only `{services, task}` to `./.token-eater.yaml`.
 
 **Dependency preflight (required companion):** token-eater's code reviewers are the compound-engineering
 plugin's `ce-*` personas. Check whether they're present (glob

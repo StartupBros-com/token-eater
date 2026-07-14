@@ -113,6 +113,12 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ -n "$REPO" ] && [ -n "$SKILL" ] || die "need --repo --skill (--gate is OPTIONAL - omit it to auto-detect the strongest green check; --target is an OPTIONAL hint - omit it to let the skill find its own target)"
+
+# CONSENT PREFLIGHT MUST BE FIRST. It runs before git, service detection, auth, fetch, gates, or any
+# other target-repository command. Consent is operator-global, keyed by this physical repository path,
+# and versioned in consent-preflight.sh. A tracked file inside the target repository is never trusted.
+REPO="$(bash "$HERE/consent-preflight.sh" "$REPO" "$TRUST_REPO")" || exit $?
+
 # Target selection belongs on the service, not here: most maintenance skills (de-monolithize's
 # census, dead-code's gate scan, etc.) find their own targets via subagents. Pass --target only as
 # a hint; with none, tell the skill to find the worst offenders itself.
@@ -137,7 +143,6 @@ fi
 git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a git repo: $REPO"  # .git can be a FILE in a linked worktree
 command -v "$SERVICE" >/dev/null 2>&1 || die "service CLI not found: $SERVICE"
 
-REPO="$(cd "$REPO" && pwd)"
 ORIGIN_SLUG="$(git -C "$REPO" remote get-url origin 2>/dev/null | sed -E 's#(git@[^:]+:|https?://[^/]+/)##; s#\.git$##')" || die "no origin remote"
 # Validate: ORIGIN_SLUG is repo-controlled (from its origin URL) and flows into `gh pr create --repo`
 # and the agent recipe. Refuse anything but a plain owner/repo slug so a crafted remote can't redirect
@@ -147,16 +152,6 @@ case "$ORIGIN_SLUG" in
 esac
 case "$ORIGIN_SLUG" in */*) : ;; *) die "refusing origin slug without owner/repo shape: '$ORIGIN_SLUG'";; esac
 
-# TRUST GATE - token-eater runs THIS repo's own code on your machine (its gate command, e.g. `npm test`,
-# and with --install-deps its dependency install scripts). Never do that for an untrusted repo silently:
-# require explicit, remembered consent. First run on a repo needs --trust-repo; it's cached thereafter.
-TRUST_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/token-eater/trusted-repos"
-if [ "$TRUST_REPO" = 1 ]; then
-  mkdir -p "$(dirname "$TRUST_FILE")"
-  grep -qxF "$ORIGIN_SLUG" "$TRUST_FILE" 2>/dev/null || printf '%s\n' "$ORIGIN_SLUG" >> "$TRUST_FILE"
-elif ! grep -qxF "$ORIGIN_SLUG" "$TRUST_FILE" 2>/dev/null; then
-  die "token-eater will run $ORIGIN_SLUG's own gate/build code on this machine (and, with --install-deps, its install scripts). If you trust this repo, re-run with --trust-repo (remembered after the first time)."
-fi
 # Make run artifacts + worktrees invisible to the member's `git status`/`git add .` BEFORE
 # anything is created (pro-gate self-review P1: RESULT_DIR used to be created ~30 lines before
 # wt.sh installed the excludes, so an early failure — auth, fetch, worktree-add — left an

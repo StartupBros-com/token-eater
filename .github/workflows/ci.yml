@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
 
       - name: Validate JSON files
         run: |
@@ -38,3 +38,8 @@ jobs:
           set -euo pipefail
           command -v shellcheck >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y shellcheck)
           find . -path './.git' -prune -o -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
+
+      - name: Test shell scripts
+        run: |
+          bash tests/consent-preflight.sh
+          bash tests/release-train.test.sh

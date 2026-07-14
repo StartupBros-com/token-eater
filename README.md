@@ -20,8 +20,10 @@ The first time, it asks a couple of plain questions (what to clean up, which cre
 
 ## Safety
 
-- **Prefers proof, degrades honestly.** When your project has tests/type-check, it runs them and re-verifies the result independently. When it doesn't, it still helps but the PR is clearly labeled "AI-reviewed only — please read before merging."
-- **Runs your project's own code** (its tests/build; with opt-in, its install scripts), so it asks before running an unfamiliar project and remembers your answer. Point it only at projects you trust.
+- **Informed consent comes first.** Before any shell command runs against a project, token-eater explains that it will execute that project's tests, builds, and lint commands. With a separate opt-in, it can also run dependency lifecycle scripts. Accept only for repositories you trust.
+- Consent is saved outside the project, keyed by its canonical filesystem path and the current caveat version. The same version does not ask again. A changed caveat asks again. A repository cannot bypass the prompt by committing a token-eater config or consent file.
+- **The isolated worktree is not a security sandbox.** It protects your current checkout and uncommitted work, but project code can still access files, credentials, and the network available to your user account. OS sandboxing remains future hardening.
+- **Prefers proof, degrades honestly.** When your project has tests/type-check, it runs them and re-verifies the result independently. When it doesn't, it still helps but the PR is clearly labeled "AI-reviewed only, please read before merging."
 - Every run happens in an isolated copy of your project. Your branch and uncommitted work are never touched.
 - Never merges, never marks a PR ready, never auto-pushes to main.
 - Only spends the credits you chose.

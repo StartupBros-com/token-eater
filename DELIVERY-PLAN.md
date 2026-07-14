@@ -38,7 +38,7 @@ command, native versioning/updates, no `curl|bash`.
      reviewers — install it?" → `/plugin install compound-engineering@hov` → continue.
    - **Engine fallback** (already shipped): if the personas aren't found, `run-session.sh` degrades to
      generic-lens reviewers rather than failing — the safety net.
-5. **HoV course / vault content** in `~/SITES/prbot/apps/startupbros/content/` — a short lesson:
+5. **HoV course / vault content** in the House of Vibe app content directory — a short lesson:
    "Put your expiring AI credits to work" → the two install commands + `/token-eater` + how to review
    the draft PR. Plain language, screenshots, no flags.
 
