@@ -16,9 +16,13 @@ they never type a flag. Ask only what isn't already known:
 2. **"Which credits should I use?"** — only if more than one service is signed in (else pick the one
    that is, silently). Plain wording: "Claude / Grok / Codex credits". → saved as `services`.
 
-Offer only services that `scripts/detect-adapters.sh` reports `available`. **Save the answers to
-`./.token-eater.yaml`** and continue the run. Do not ask about trust as a separate question — the
-member choosing to run is the consent (Claude passes `--trust-repo`; the engine remembers it per repo).
+Before any shell command, present the informed-consent caveat from `SKILL.md` and ask whether to
+continue. Only an explicit yes permits `--trust-repo-caveat 1`, where `1` is the exact caveat version
+just shown. Never reuse an affirmation after that version changes. The engine records consent outside
+the repository, keyed by canonical path and caveat version. Project config never counts as consent.
+
+After consent, offer only services that `scripts/detect-adapters.sh` reports `available`. **Save the
+answers to `./.token-eater.yaml`** and continue the run.
 
 If `$ARGUMENTS` already names a service and/or skill (power user), skip the matching question(s); offer
 to save them once.

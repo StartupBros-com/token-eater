@@ -11,30 +11,30 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    name: check
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Provision pinned CI tools
+        run: ./scripts/provision-ci-tools.sh
 
-      - name: Validate JSON files
-        run: |
-          set -euo pipefail
-          find . -path './.git' -prune -o -name '*.json' -print | while read -r f; do
-            echo "checking $f"
-            jq empty "$f"
-          done
-
-      - name: Validate YAML files
-        run: |
-          set -euo pipefail
-          find . -path './.git' -prune -o \( -name '*.yaml' -o -name '*.yml' \) -print | while read -r f; do
-            echo "checking $f"
-            yq eval '.' "$f" > /dev/null
-          done
+      - name: Validate data files
+        run: ./scripts/validate-data.sh
 
       - name: Shellcheck
         run: |
           set -euo pipefail
-          command -v shellcheck >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y shellcheck)
+          command -v shellcheck >/dev/null
           find . -path './.git' -prune -o -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
+
+      - name: Test shell scripts
+        run: |
+          bash tests/consent-preflight.sh
+          bash tests/release-train.test.sh
+          bash tests/workflows.test.sh
