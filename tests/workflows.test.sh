@@ -40,7 +40,7 @@ pass 'malformed public PR JSON and YAML fail'
 grep -q 'gh api --paginate --slurp' "$release" || fail 'release pagination is not globally aggregated'
 grep -q 'runs-on: ubuntu-24.04' "$release" || fail 'release train is not isolated on a GitHub-hosted runner'
 ! grep -q 'self-hosted' "$release" || fail 'release train still shares the persistent PR runner pool'
-grep -q 'HOV_MARKETPLACE_PAT' "$release" || fail 'release execution lost required marketplace credential'
+grep -q 'HOV_MARKETPLACE_DEPLOY_KEY' "$release" || fail 'release execution lost required marketplace deploy key'
 pass 'secret-bearing release execution is isolated from persistent PR runners'
 
 grep -q 'gh_2.74.2_linux_amd64.tar.gz' "$ROOT/scripts/provision-ci-tools.sh" || fail 'pinned gh archive missing'
