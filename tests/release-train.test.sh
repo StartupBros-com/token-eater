@@ -112,4 +112,12 @@ assert_eq "$(jq -r '.plugins[] | select(.name=="token-eater") | .metadata.releas
 env "${common[@]}" EVENT_ACTION=edited RELEASE_PRERELEASE=true "$ROOT/scripts/release-train.sh" >/dev/null
 assert_eq "$(wc -l < "$TMP/curl.log")" 4 'edited prerelease remains production no-op'
 
+# --- notes_summary: card-ready bullets for the What's-new announcement section ---
+ns() { RELEASE_NOTES="$1" bash -c "source <(sed -n '/^notes_summary()/,/^}/p' '$ROOT/scripts/release-train.sh'); notes_summary"; }
+AUTO="$(printf '%s\n' "## Whats Changed" "* feat(token-eater): safer cleanup passes (v0.5.0) by @u in https://x/pull/1" "* fix(token-eater): draft PR guard by @u in https://x/pull/2" "" "**Full Changelog**: https://x/compare/a...b")"
+assert_eq "$(ns "$AUTO")" "$(printf 'safer cleanup passes\ndraft PR guard')" 'auto-notes bullets are cleaned'
+HL="$(printf '%s\n' "## Highlights" "* Hand-picked one" "" "## Whats Changed" "* feat: noise by @u in https://x")"
+assert_eq "$(ns "$HL")" 'Hand-picked one' 'Highlights section wins'
+assert_eq "$(ns 'Prose only body.')" 'Prose only body. ' 'prose falls back to first paragraph (legacy trailing space; endpoint trims)'
+
 echo 'ALL PASS'
