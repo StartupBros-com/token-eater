@@ -119,5 +119,9 @@ assert_eq "$(ns "$AUTO")" "$(printf 'safer cleanup passes\ndraft PR guard')" 'au
 HL="$(printf '%s\n' "## Highlights" "* Hand-picked one" "" "## Whats Changed" "* feat: noise by @u in https://x")"
 assert_eq "$(ns "$HL")" 'Hand-picked one' 'Highlights section wins'
 assert_eq "$(ns 'Prose only body.')" 'Prose only body. ' 'prose falls back to first paragraph (legacy trailing space; endpoint trims)'
+CONTRIB="$(printf '%s\n' "## Whats Changed" '* feat: real change by @u in https://x/pull/1' '' '## New Contributors' '* @newbie made their first contribution in https://x/pull/1')"
+assert_eq "$(ns "$CONTRIB")" 'real change' 'contributor-section bullets never become highlights'
+CJK_OUT="$(ns "$(printf '* %s' "$(python3 -c "print('测' * 200)")")")"
+assert_eq "$(printf '%s' "$CJK_OUT" | python3 -c 'import sys; print(len(sys.stdin.read()))')" '180' 'multibyte bullets slice at 180 characters'
 
 echo 'ALL PASS'
