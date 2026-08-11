@@ -1,3 +1,16 @@
+> **Historical (superseded 2026-08-03).** This was the pre-distribution gate
+> checklist, written before token-eater shipped. Its "Open — DELIVERY" section
+> asks for an install mechanism that now exists: token-eater is published in the
+> [House of Vibe marketplace](https://github.com/StartupBros-com/hov-marketplace)
+> and installs with `/plugin install token-eater@hov`. Kept for the reasoning
+> trail, not as a current status report.
+>
+> The one item here that is still live is the trust boundary, and it is not a
+> secret: the tool runs your project's own gate command in an unsandboxed shell
+> under your user account, which is why it refuses to run without explicit
+> per-repo consent. That is stated plainly in the README's Safety section, which
+> is the current source of truth.
+
 # Distribution readiness — House of Vibe
 
 token-eater is **internal-ready on `main`** (works for power users on Linux/macOS). This is the gate
