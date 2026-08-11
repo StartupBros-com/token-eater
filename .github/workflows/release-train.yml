@@ -58,9 +58,6 @@ jobs:
           REPOSITORY: token-eater
           RELEASE_ID: ${{ github.event.release.id }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-          RELEASE_NAME: ${{ github.event.release.name || github.event.release.tag_name }}
-          RELEASE_URL: ${{ github.event.release.html_url }}
-          RELEASE_NOTES: ${{ github.event.release.body }}
           RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
           RELEASE_DRAFT: ${{ github.event.release.draft }}
           LATEST_STABLE_ID: ${{ steps.stable.outputs.id }}
@@ -68,9 +65,6 @@ jobs:
           SOURCE_SHA: ${{ github.event.release.target_commitish }}
           MARKETPLACE_DIR: ${{ github.workspace }}/hov-marketplace
           MARKETPLACE_VALIDATION_MODE: ${{ vars.HOV_MARKETPLACE_VALIDATION_MODE || 'syntax' }}
-          # Promotion remains local for backward-compatible marketplace updates.
-          # The dependent reusable job owns the one Discord post via OIDC.
-          PROMOTE_ONLY: true
         run: |
           source_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
           export SOURCE_SHA="$source_sha"
@@ -83,4 +77,4 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: StartupBros-com/hov-marketplace/.github/workflows/hov-tool-drop-announce.yml@c981b872ebf650805200ad72c8b7142232f8b3f6
+    uses: StartupBros-com/hov-marketplace/.github/workflows/hov-tool-drop-announce.yml@08f7d22f3a5b59b1658ab2e96a20d0d3c352869c
