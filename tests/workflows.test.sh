@@ -43,8 +43,12 @@ pass 'malformed public PR JSON and YAML fail'
 grep -q 'gh api --paginate --slurp' "$release" || fail 'release pagination is not globally aggregated'
 grep -q 'runs-on: ubuntu-24.04' "$release" || fail 'release train is not isolated on a GitHub-hosted runner'
 ! grep -q 'self-hosted' "$release" || fail 'release train still shares the persistent PR runner pool'
-grep -q 'HOV_MARKETPLACE_DEPLOY_KEY' "$release" || fail 'release execution lost required marketplace deploy key'
-pass 'secret-bearing release execution is isolated from persistent PR runners'
+# The marketplace deploy key is RETIRED (2026-08-11). A standing credential
+# able to write the distribution manifest is the one whose compromise reaches
+# every installed client, and a direct bot push cannot satisfy hov-marketplace's
+# required checks anyway. Promotion is now a reviewed repin PR.
+! grep -q 'HOV_MARKETPLACE_DEPLOY_KEY' "$release" || fail 'marketplace deploy key must stay retired'
+pass 'release execution carries no marketplace write credential'
 
 grep -q 'gh_2.74.2_linux_amd64.tar.gz' "$ROOT/scripts/provision-ci-tools.sh" || fail 'pinned gh archive missing'
 grep -q 'c421091ae5800390e6aef1f50bfda59cc1d4f2ef2200bcd4e1a662c05c28c444' "$ROOT/scripts/provision-ci-tools.sh" || fail 'pinned gh checksum missing'
