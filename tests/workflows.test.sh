@@ -19,6 +19,9 @@ pass 'latest stable selector rejects malformed page shape'
 
 ci="$ROOT/.github/workflows/ci.yml"
 release="$ROOT/.github/workflows/release-train.yml"
+version="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+plugin_version="$(jq -er '.version' "$ROOT/.claude-plugin/plugin.json")"
+assert_eq "$version" "$plugin_version" 'VERSION and plugin.json move in lockstep for the OIDC announce verifier'
 grep -q 'runs-on: ubuntu-24.04' "$ci" || fail 'PR CI is not GitHub-hosted'
 ! grep -q 'self-hosted' "$ci" || fail 'PR CI still uses a secret-bearing self-hosted runner'
 grep -q 'persist-credentials: false' "$ci" || fail 'PR checkout persists credentials'
