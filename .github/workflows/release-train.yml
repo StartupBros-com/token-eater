@@ -52,7 +52,7 @@ jobs:
           path: hov-marketplace
           fetch-depth: 0
 
-      - name: Promote release and announce
+      - name: Promote release
         env:
           EVENT_ACTION: ${{ github.event.action }}
           REPOSITORY: token-eater
@@ -68,9 +68,19 @@ jobs:
           SOURCE_SHA: ${{ github.event.release.target_commitish }}
           MARKETPLACE_DIR: ${{ github.workspace }}/hov-marketplace
           MARKETPLACE_VALIDATION_MODE: ${{ vars.HOV_MARKETPLACE_VALIDATION_MODE || 'syntax' }}
-          ANNOUNCE_URL: ${{ vars.TOOL_RELEASE_ANNOUNCE_URL }}
-          ANNOUNCE_SECRET: ${{ secrets.TOOL_RELEASE_ANNOUNCE_SECRET }}
+          # Promotion remains local for backward-compatible marketplace updates.
+          # The dependent reusable job owns the one Discord post via OIDC.
+          PROMOTE_ONLY: true
         run: |
           source_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
           export SOURCE_SHA="$source_sha"
           ./scripts/release-train.sh
+
+  announce:
+    name: Announce via canonical OIDC train
+    needs: promote
+    if: github.event.release.draft == false && github.event.release.prerelease == false && needs.promote.result == 'success'
+    permissions:
+      contents: read
+      id-token: write
+    uses: StartupBros-com/hov-marketplace/.github/workflows/hov-tool-drop-announce.yml@c981b872ebf650805200ad72c8b7142232f8b3f6
