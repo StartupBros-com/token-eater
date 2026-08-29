@@ -1,14 +1,14 @@
 # Setup and config
 
-Config exists so a non-technical member types `/token-eater` and nothing else — **ever**. The first
+Config exists so the user types `/token-eater` and nothing else — **ever**. The first
 run asks a short interactive preflight (plain language), saves the answers, and every run after that
-is zero-questions. Config records only the member's *choices* (which credits, what task) — never
+is zero-questions. Config records only the user's *choices* (which credits, what task) — never
 secrets, postures, tiers, idle windows, or reserve floors (those concepts are gone).
 
 ## Interactive preflight (asked once, then persisted)
 
 Run the preflight when there is **no readable config** and no relevant `$ARGUMENTS`, or when the
-`setup` token is passed. Use the **AskUserQuestion tool** so the member clicks plain-language choices —
+`setup` token is passed. Use the **AskUserQuestion tool** so the user clicks plain-language choices —
 they never type a flag. Ask only what isn't already known:
 
 1. **"What should I do?"** — plain-language options that map to skills (see SKILL.md's mapping table).
@@ -46,7 +46,7 @@ Schema version `2` is YAML, intentionally small enough for an agent to read and 
 version: 2
 services: [grok]              # which service(s) to spend by default, in order. The first available,
                               # un-parked service does each model chore; later ones pick up the rest.
-task: simplify-and-refactor-code-isomorphically  # the skill the member chose in the preflight ("what
+task: simplify-and-refactor-code-isomorphically  # the skill the user chose in the preflight ("what
                               # should I do?"). Persisted so /token-eater never re-asks. `setup` rewrites it.
 review_before_pr: false       # optional: run one review pass before opening each draft PR
                               # (default off — review the draft PR yourself, e.g. with /ce-code-review)
@@ -61,7 +61,7 @@ Field meanings:
 | ----- | ------- |
 | `version` | Config schema version. Current value: `2`. An unknown version should stop and ask to re-run setup rather than guess. |
 | `services` | Ordered list of service ids from `adapters.yaml` to spend. A service must also be detected before it can be used. A command-line service argument overrides this list for that run. |
-| `task` | The skill chosen in the preflight (plain-language "what should I do?" → skill name). Persisted so the member is never re-asked. Omitted/empty → ask the preflight question. A skill argument overrides it for that run. |
+| `task` | The skill chosen in the preflight (plain-language "what should I do?" → skill name). Persisted so the user is never re-asked. Omitted/empty → ask the preflight question. A skill argument overrides it for that run. |
 | `review_before_pr` | When `true`, run the optional pass in `references/review-pipeline.md` before each draft PR. Default `false`. |
 | `stop_when_low` | Optional balance guard, e.g. `"20%"`. Only has effect when onwatch is available (`scripts/onwatch-usage.sh`); otherwise the run simply continues until each service's circuit breaker fires. |
 | `result_dir` | Repo-relative directory for run artifacts and the ledger. Defaults to `.token-eater/runs`. |

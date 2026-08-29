@@ -9,7 +9,7 @@
 #   exec is "tool" (deterministic fixer, no model/credits) or "model" (delegate to an adapter),
 #   read straight from skills-catalog.yaml so the harvest loop need not re-parse the catalog.
 # Dependency-free (awk + filesystem + command -v). Skills are detected by filesystem
-# presence so it works for House of Vibe members, not just this machine.
+# presence so it works for users, not just this machine.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

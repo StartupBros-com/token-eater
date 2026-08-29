@@ -3,7 +3,7 @@
 token-eater runs every chore in its own git worktree so it never disturbs the user's
 checkout and so parallel runs (and parallel token-eater sessions) cannot corrupt each
 other. `scripts/wt.sh` owns this — it vendors the proven conventions from the
-compound-engineering `ce-worktree` skill and `wt-sweep.sh`, so House of Vibe members do
+compound-engineering `ce-worktree` skill and `wt-sweep.sh`, so users do
 not need those installed.
 
 ## Isolation guarantee

@@ -1,6 +1,6 @@
 # Result handling
 
-Result handling turns each delegated chore outcome into a reviewable artifact, an append-only ledger entry, and a plain-language member summary. A gate-passing worktree becomes a branch plus a draft PR when a remote is available, or a branch-only result when no remote exists. Nothing ever auto-merges to the default branch (R14).
+Result handling turns each delegated chore outcome into a reviewable artifact, an append-only ledger entry, and a plain-language user summary. A gate-passing worktree becomes a branch plus a draft PR when a remote is available, or a branch-only result when no remote exists. Nothing ever auto-merges to the default branch (R14).
 
 This playbook is called after every delegated chore and once at the end of the run.
 
@@ -11,7 +11,7 @@ This playbook is called after every delegated chore and once at the end of the r
 - Open draft PRs only: `gh pr create --draft` (R14).
 - If there is no usable git remote or `gh` is unavailable, keep a local branch and report it as branch-only.
 - Append one ledger entry per chore attempt, including provider used, gate outcome, spend estimate, and PR/branch reference (R17).
-- End the run with a plain-language summary that says what was cleaned and what to review, without requiring the member to understand model routing, worktrees, or gates (R20).
+- End the run with a plain-language summary that says what was cleaned and what to review, without requiring the user to understand model routing, worktrees, or gates (R20).
 
 ## Artifact locations
 
@@ -132,13 +132,13 @@ Use this path only when the deterministic gate passed and the worktree contains 
 
 ## No-remote or no-`gh` path
 
-When the project has no remote, the member still gets a reviewable branch:
+When the project has no remote, the user still gets a reviewable branch:
 
 1. Commit the gate-passing changes on `token-eater/<run-id>` in the worktree.
 2. Do not push.
 3. Do not try to create a PR.
 4. Record `branch-only: token-eater/<run-id>` and the reason, such as `no git remote` or `gh unavailable`.
-5. Tell the member plainly: "I left this as a local branch because this repository does not have a remote configured."
+5. Tell the user plainly: "I left this as a local branch because this repository does not have a remote configured."
 
 Branch-only is a valid R14 outcome.
 
