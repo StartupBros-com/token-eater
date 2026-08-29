@@ -33,15 +33,15 @@ with the files, credentials, and network access available to your WSL user.
 
 <input> #$ARGUMENTS </input>
 
-## Audience first: the member just types `/token-eater`
+## Audience first: the user just types `/token-eater`
 
-**The person running this is usually a non-technical House of Vibe member.** They do NOT know what a
-gate, a flag, a parameter, or a "skill name" is — and they must never need to. They type
-`/token-eater` and nothing else. **You (Claude) are the friendly layer**: you collect what's needed
-through **plain-language, interactive multiple-choice questions** (use the AskUserQuestion tool — the
-member clicks a choice, never types a flag), you translate those choices into `run-session.sh` flags
-yourself, and you report back in plain English. The flags in this doc are *your* contract with the
-engine, never something you show the member.
+**Assume the person running this does not want to learn this tool's flags** — not because they
+could not, but because nobody should read a manual to spend credits that are about to expire. They
+type `/token-eater` and nothing else. **You (Claude) are the friendly layer**: you collect what's
+needed through **plain-language, interactive multiple-choice questions** (use the AskUserQuestion
+tool — a click beats a flag), you translate those choices into `run-session.sh` flags yourself, and
+you report back in plain English. The flags in this doc are *your* contract with the engine, never
+something you make the user read.
 
 ### First run on a project (not yet configured) → interactive preflight, then persist
 
@@ -55,7 +55,7 @@ When there's no saved config (`references/setup-and-config.md`) and no `$ARGUMEN
    one that is, silently. Phrase as "Claude / Grok / Codex credits", not "service".
 
 Before any shell command, explain plainly that token-eater will run this project's own checks and that
-the isolated worktree is not a security sandbox: project code can access the member's files, credentials,
+the isolated worktree is not a security sandbox: project code can access the user's files, credentials,
 and network. Ask whether to continue. Only after an explicit yes, pass `--trust-repo-caveat 1`. The engine stores
 versioned consent outside the project, keyed by its canonical path. The same caveat version asks nothing
 later; a version bump asks again. Never infer consent from `./.token-eater.yaml` or any tracked project
@@ -64,10 +64,10 @@ file. Persist only `{services, task}` to `./.token-eater.yaml`.
 **Dependency preflight (required companion):** token-eater's code reviewers are the compound-engineering
 plugin's `ce-*` personas. Check whether they're present (glob
 `~/.claude/plugins/marketplaces/*/plugins/compound-engineering/agents/ce-correctness-reviewer.md`). If
-**missing**, tell the member plainly — "I use the *compound-engineering* plugin for the code reviews;
+**missing**, tell the user plainly — "I use the *compound-engineering* plugin for the code reviews;
 want me to install it?" — and on yes run `/plugin install compound-engineering@hov` (or
 `@every-marketplace`), then continue. (If they decline, the run still works but the review degrades to
-generic lenses — say so.) Never show the member the word "plugin dependency" or a `ce-*` agent name.
+generic lenses — say so.) Never show the user the word "plugin dependency" or a `ce-*` agent name.
 
 Plain-language task → skill mapping:
 
@@ -83,7 +83,7 @@ Plain-language task → skill mapping:
 If `./.token-eater.yaml` (or user config) already has `{services, task}`, just run with them — no
 questions. The engine's per-repo trust cache means no affirmation flag is needed while caveat version 1
 remains recorded. If the caveat version changes, show the new text and pass that exact new version only
-after another explicit yes. The member types `/token-eater`, you run, you report. To change the saved choices later they can run
+after another explicit yes. The user types `/token-eater`, you run, you report. To change the saved choices later they can run
 `/token-eater setup`.
 
 ### Power-user arguments (optional — for someone who knows the tokens)
@@ -106,7 +106,7 @@ A token-eater run is **one session**: one service, one skill, one polished draft
 
 2. **The gate is auto-detected — you don't need to pick it.** `run-session.sh` makes the project's deps available in the worktree (shared from the user's checkout by default; `--install-deps` opts into a fresh, worktree-local install), then climbs a ladder (strongest green check first): **Tier A** `typecheck && test` → **Tier B** `typecheck`/`build`/`lint` → **Tier C (soft)** no deterministic gate, in which case it still runs but relies on the AI review + a clearly-flagged draft PR. So just **omit `--gate`** and let the engine choose; pass `--gate "<cmd>"` only to override. (Less-technical users with no tests still get a useful run, plainly labeled lower-confidence.)
 
-3. **The task is already chosen — don't show a jargon menu.** It came from the interactive preflight's "What should I do?" (mapped to a skill), from saved `./.token-eater.yaml`, or from a power-user skill argument. NEVER present raw skill names (`de-monolithize`, `mock-removal`, …) to a member — those only appear in the plain-language mapping above. Verify the chosen skill is installed (`skills-catalog.yaml` + `scripts/detect-skills.sh`); if not, fall back to the recommended one and say so plainly.
+3. **The task is already chosen — don't show a jargon menu.** It came from the interactive preflight's "What should I do?" (mapped to a skill), from saved `./.token-eater.yaml`, or from a power-user skill argument. NEVER present raw skill names (`de-monolithize`, `mock-removal`, …) to a user — those only appear in the plain-language mapping above. Verify the chosen skill is installed (`skills-catalog.yaml` + `scripts/detect-skills.sh`); if not, fall back to the recommended one and say so plainly.
 
 4. **Let the skill find its own target — on the service's credits.** Do NOT pre-pick a target with a crude heuristic (e.g. "the largest file"): that wastes *your* tokens and overrides the skill's better, service-run analysis. Most of these skills discover their own work — de-monolithize runs a census that ranks monoliths and skips generated / justified-cohesive files; dead-code keys off the gate's unused-symbol output. Choosing the right target is itself token-heavy analysis that belongs on the service. So pass `--target` only as an optional **scope hint** (e.g. "focus on the API layer") — or omit it entirely and let the skill choose.
 
@@ -118,9 +118,9 @@ A token-eater run is **one session**: one service, one skill, one polished draft
      --rounds 2 --trust-repo-caveat 1 [--gate "<override>"] [--install-deps] [--pace gentle|thorough] [--target "<hint>"]
    ```
 
-   **You pass these flags, not the member.** `--trust-repo-caveat 1` is justified only by the member's
+   **You pass these flags, not the user.** `--trust-repo-caveat 1` is justified only by the user's
    explicit acceptance of caveat version 1 just shown (the engine caches that version per repo); pass
-   `--install-deps` only if the member opted
+   `--install-deps` only if the user opted
    into it (don't, by default). `--gate` is optional (auto-detected — step 2). Add `--dry-run` to
    render the recipe and stop. The service then runs the whole loop (skill -> gate -> review + fix, up
    to `--rounds` rounds -> push -> draft PR) on its own credits — the review uses the real

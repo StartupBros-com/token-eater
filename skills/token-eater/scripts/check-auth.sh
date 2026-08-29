@@ -5,7 +5,7 @@
 # Prints: <status>\t<plain-language message>
 # Exit:   0 ready | 3 needs-reauth (park/pause this adapter) | 2 unknown (proceed with caution)
 #
-# Messages are written for non-technical House of Vibe members — no OAuth/UTC jargon.
+# Messages are written for users — no OAuth/UTC jargon.
 set -euo pipefail
 
 A="${1:?adapter required: grok|codex|claude}"

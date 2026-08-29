@@ -72,7 +72,7 @@ te_timeout() {
 ensure_deps() {
   local wt="$1" d
   # wt.sh symlinks node_modules/.venv/venv from the MAIN checkout so gates resolve without an
-  # install. Installing THROUGH those symlinks would mutate the member's real checkout — the
+  # install. Installing THROUGH those symlinks would mutate the user's real checkout — the
   # exact "never touched" invariant this tool promises. Replace symlinks with a real,
   # worktree-local install before any package manager runs.
   for d in node_modules .venv venv; do
@@ -153,7 +153,7 @@ case "$ORIGIN_SLUG" in
 esac
 case "$ORIGIN_SLUG" in */*) : ;; *) die "refusing origin slug without owner/repo shape: '$ORIGIN_SLUG'";; esac
 
-# Make run artifacts + worktrees invisible to the member's `git status`/`git add .` BEFORE
+# Make run artifacts + worktrees invisible to the user's `git status`/`git add .` BEFORE
 # anything is created (pro-gate self-review P1: RESULT_DIR used to be created ~30 lines before
 # wt.sh installed the excludes, so an early failure — auth, fetch, worktree-add — left an
 # unignored .token-eater/ in the checkout). wt.sh repeats this idempotently for standalone use.
@@ -210,7 +210,7 @@ fi
 # Tell the service the TRUTH about dependency state (the recipe used to claim "already
 # installed" unconditionally, and the service wasted turns mis-diagnosing gate failures).
 # Whatever the state, the service must never install: through the shared symlink an install
-# would mutate the member's real checkout, and install scripts are the opt-in RCE path.
+# would mutate the user's real checkout, and install scripts are the opt-in RCE path.
 if [ "$INSTALL_DEPS" = 1 ]; then
   # Verify the install actually produced artifacts — ensure_deps is deliberately best-effort
   # and silent, so "installed fresh" was an overclaim whenever it failed (pro-gate self-review

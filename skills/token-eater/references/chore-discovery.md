@@ -2,7 +2,7 @@
 
 Chore discovery builds the backlog token-eater may delegate. The trust boundary is simple: admit a chore only when a deterministic gate can verify it (KTD9, R5). Everything else stays out of the unattended path, even if it looks useful.
 
-The member path is fully automatic. Do not ask the user to curate a backlog, pick files, or classify chores (R19). The agent discovers cheap signals, attaches a gate, and passes the resulting backlog to the run loop.
+The user path is fully automatic. Do not ask the user to curate a backlog, pick files, or classify chores (R19). The agent discovers cheap signals, attaches a gate, and passes the resulting backlog to the run loop.
 
 ## Deterministic-gate eligibility rule
 
@@ -29,7 +29,7 @@ If no gate exists, exclude the candidate and record the reason in the run summar
 
 ## Skill-aware discovery
 
-Discovery is skill-aware, but still gate-first. `skills-catalog.yaml` maps chore archetypes to the skill or bundled prompt that may perform them; `scripts/detect-skills.sh` resolves that catalog on the member's machine. Use the detector before creating chore candidates so token-eater can reuse installed skills without making them a hard dependency (KTD6, R18, R19).
+Discovery is skill-aware, but still gate-first. `skills-catalog.yaml` maps chore archetypes to the skill or bundled prompt that may perform them; `scripts/detect-skills.sh` resolves that catalog on the user's machine. Use the detector before creating chore candidates so token-eater can reuse installed skills without making them a hard dependency (KTD6, R18, R19).
 
 Run from the token-eater package root:
 
@@ -57,7 +57,7 @@ Statuses mean:
 Resolution order is per archetype:
 
 1. Use the installed skill/tool declared by `skills-catalog.yaml`.
-2. Else suggest the catalog's HoV drop-in, if present. Say plainly that the HoV drop-in is stubbed and not available yet; it is a placeholder for a future member-friendly skill download.
+2. Else suggest the catalog's HoV drop-in, if present. Say plainly that the HoV drop-in is stubbed and not available yet; it is a placeholder for a future user-friendly skill download.
 3. Else use token-eater's bundled prompt/tool, if the detector reports `bundled`.
 4. Else skip the archetype.
 
@@ -71,7 +71,7 @@ Special cases:
 
 - `prose-deslop` is `review-only` in the catalog. It has no deterministic gate and runs only when the user explicitly opted into review-only mode. In normal unattended harvesting, skip it and explain: "Skipped prose cleanup because you did not enable review-only chores."
 - High-stakes skills such as bug hunting, deadlock fixing, and security auditing are deliberately not in `skills-catalog.yaml`. Leave them with Claude or a human reviewer. Do not discover or delegate them through token-eater's cheap-credit path, even if such skills are installed.
-- A HoV drop-in suggestion is member education, not execution. Do not pretend the stubbed registry item is downloadable until the catalog says it is real.
+- A HoV drop-in suggestion is user education, not execution. Do not pretend the stubbed registry item is downloadable until the catalog says it is real.
 
 ## Cheap discovery signals
 
@@ -108,7 +108,7 @@ For formatter and lint debt, prefer the project's own script or target over an a
 
 This is not just style. Project scripts encode the repo's real globs, package boundaries, ignore files, and framework path conventions. A root-level ad-hoc command such as `pnpm exec prettier --check .` can misread framework paths like Next.js route groups `(group)` or dynamic routes `[param]`, or scan files the project intentionally excludes, producing false signals. Use the per-package or project-owned gate as both the discovery signal and the chore's gate whenever it exists.
 
-**Discover with the project's globs; fix by explicit file list.** Using the project's own *check* to find debt is correct — it honors the repo's ignore files and config, so the reported debt set is true. But do not assume the project's own *write* script will fix exactly that set. A script such as `prettier --write src/**/*.ts` depends on shell glob expansion, and without `shopt -s globstar` bash collapses `**` to `*`, silently skipping files directly under `src/` (e.g. `src/index.ts`) and leaving the gate red for a reason a member cannot see. So: (1) DISCOVER the dirty set with the project's check, capturing the exact list of files it reports; (2) FIX by passing that explicit file list to the formatter (`pnpm exec prettier --write <those files>`) rather than re-running a glob that may miss files; (3) GATE by re-checking exactly those files. This keeps the project's correct ignore/config behavior while guaranteeing every discovered file is actually fixed. If the check reports zero debt, there is no chore.
+**Discover with the project's globs; fix by explicit file list.** Using the project's own *check* to find debt is correct — it honors the repo's ignore files and config, so the reported debt set is true. But do not assume the project's own *write* script will fix exactly that set. A script such as `prettier --write src/**/*.ts` depends on shell glob expansion, and without `shopt -s globstar` bash collapses `**` to `*`, silently skipping files directly under `src/` (e.g. `src/index.ts`) and leaving the gate red for a reason a user cannot see. So: (1) DISCOVER the dirty set with the project's check, capturing the exact list of files it reports; (2) FIX by passing that explicit file list to the formatter (`pnpm exec prettier --write <those files>`) rather than re-running a glob that may miss files; (3) GATE by re-checking exactly those files. This keeps the project's correct ignore/config behavior while guaranteeing every discovered file is actually fixed. If the check reports zero debt, there is no chore.
 
 Ad-hoc tool commands are fallback only after checking for project-owned scripts/targets and local tool config. When falling back, keep the file list explicit and quote paths safely.
 
@@ -132,7 +132,7 @@ The backlog should usually begin with formatter idempotency. It is cheap, low-ri
 
 token-eater is self-contained, but it may use catalog-declared installed skills as prompt sources when they are present. The skill-aware discovery section is authoritative: use `skills-catalog.yaml` plus `scripts/detect-skills.sh` to decide, per archetype, whether the route is `installed`, `hov-dropin-available`, `bundled`, or `missing`.
 
-Do not make optional skills required. Their absence must not block member use (KTD6, R18). When a skill is absent and no bundled route exists, skip that archetype rather than improvising an ungated prompt.
+Do not make optional skills required. Their absence must not block user use (KTD6, R18). When a skill is absent and no bundled route exists, skip that archetype rather than improvising an ungated prompt.
 
 
 
@@ -212,4 +212,4 @@ For every admitted or excluded candidate, keep one plain-language sentence for `
 - Admitted: "Formatted two TypeScript files because the formatter can verify the result."
 - Excluded: "Skipped dependency updates because this project has no test or build gate to verify them."
 
-This keeps the summary readable without asking members to understand the delegation mechanics.
+This keeps the summary readable without asking users to understand the delegation mechanics.

@@ -33,7 +33,7 @@ CB_REGEX='(usage limit|rate.?limit|429|All accounts are temporarily unavailable)
 
 # --- run the claude contract, cwd = worktree (inline prompt; schema only if supplied) ---
 # Permissions: the recipe REQUIRES Bash (run the gate, git add/commit/push). Under headless
-# `-p`, un-allowlisted tools are DENIED (no prompt is possible), so on a fresh member machine
+# `-p`, un-allowlisted tools are DENIED (no prompt is possible), so on a fresh user machine
 # plain acceptEdits means claude can edit but never run the gate or commit — masked on dev
 # boxes whose user settings carry broad Bash allow rules. The explicit allowlist below makes
 # behavior deterministic on every host. Bash must be broad because the gate command is

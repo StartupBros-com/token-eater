@@ -36,9 +36,9 @@ The placeholder substitution differs per adapter (path vs. inline string; stdin 
 
 ### Balance signal — `scripts/onwatch-usage.sh` (2026-06-27)
 
-token-eater can optionally read credit/quota balances from **onwatch** when it is running, to support the `stop_when_low` setting. `onwatch-usage.sh <provider>` returns `{util_percent, resets_at, status}` and exits 3 when onwatch is absent (the common member case) — the run just continues until the circuit breaker fires. Sources: **grok** from onwatch's SQLite DB (`~/.onwatch/data/onwatch.db`, table `grok_quota_values`); **anthropic / codex** from onwatch's open Prometheus `/metrics` (seven-day window). Verified: grok 11%, resets 2026-07-01.
+token-eater can optionally read credit/quota balances from **onwatch** when it is running, to support the `stop_when_low` setting. `onwatch-usage.sh <provider>` returns `{util_percent, resets_at, status}` and exits 3 when onwatch is absent (the common user case) — the run just continues until the circuit breaker fires. Sources: **grok** from onwatch's SQLite DB (`~/.onwatch/data/onwatch.db`, table `grok_quota_values`); **anthropic / codex** from onwatch's open Prometheus `/metrics` (seven-day window). Verified: grok 11%, resets 2026-07-01.
 
-**Self-contained (no-onwatch) grok balance — finding, not yet built.** onwatch itself polls grok credits via the gRPC method `grok.com/grok_api_v2.GrokBuildBilling/GetGrokCredits` (`application/grpc-web+proto`), authenticated with the bearer token in `~/.grok/auth.json` (`.key` field). Replicating it directly — so members without onwatch get a native grok balance — needs the request message `.proto` shape: the empty-message call returns `grpc-status 12` (unimplemented). Tracked as a follow-up.
+**Self-contained (no-onwatch) grok balance — finding, not yet built.** onwatch itself polls grok credits via the gRPC method `grok.com/grok_api_v2.GrokBuildBilling/GetGrokCredits` (`application/grpc-web+proto`), authenticated with the bearer token in `~/.grok/auth.json` (`.key` field). Replicating it directly — so users without onwatch get a native grok balance — needs the request message `.proto` shape: the empty-message call returns `grpc-status 12` (unimplemented). Tracked as a follow-up.
 
 ## Detection
 

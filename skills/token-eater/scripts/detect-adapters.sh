@@ -12,7 +12,7 @@ REG="${TOKEN_EATER_REGISTRY:-$ROOT/adapters.yaml}"
 [ -f "$REG" ] || { echo "registry not found: $REG" >&2; exit 2; }
 
 # Extract each adapter id from the flat YAML list.
-# (Deliberately dependency-free: no yq/python required on a member's machine.)
+# (Deliberately dependency-free: no yq/python required on a user's machine.)
 parse_registry() {
   awk '
     /^[[:space:]]*-[[:space:]]*id:/ { id=$0; sub(/.*id:[[:space:]]*/,"",id); gsub(/"/,"",id); print id }
