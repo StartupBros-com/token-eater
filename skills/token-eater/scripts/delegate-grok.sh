@@ -22,6 +22,9 @@
 #   3 circuit-break credit/rate-limit signal detected (caller parks grok — R16)
 #   4 scope-viol    grok modified a file outside the allowed list (caller rolls back)
 set -euo pipefail
+
+# shellcheck source=skills/token-eater/scripts/lib/delegate-common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/delegate-common.sh"
 export TOKEN_EATER_DELEGATED=1   # marker so a worker that re-invokes token-eater is refused (recursion guard)
 
 WT="${1:?worktree dir required}"
@@ -60,16 +63,7 @@ ENV="$RUNDIR/envelope.json"
 awk 'f||/^[[:space:]]*\{/{f=1; print}' "$ENVRAW" > "$ENV"
 
 # --- ground truth: what changed in the worktree (the authoritative file list) ---
-CHANGED=(); while IFS= read -r _c; do CHANGED+=("$_c"); done < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' | while IFS= read -r f; do [ -L "$f" ] || printf '%s\n' "$f"; done)   # mapfile is bash 4+ (absent on macOS bash 3.2)
-MADE_CHANGES=false; [ "${#CHANGED[@]}" -gt 0 ] && MADE_CHANGES=true
-
-# --- optional scope check: every changed file must be in the allowed list ---
-SCOPE_VIOLATION=false; OFFENDERS=()
-if [ -n "$ALLOWED" ] && [ -f "$ALLOWED" ] && [ "$MADE_CHANGES" = true ]; then
-  for f in "${CHANGED[@]}"; do
-    grep -qxF "$f" "$ALLOWED" || { SCOPE_VIOLATION=true; OFFENDERS+=("$f"); }
-  done
-fi
+delegate_collect_changes_and_scope "$WT" "$ALLOWED"
 
 # --- best-effort self-report from the .text ```json fence (advisory only) ---
 STOP_REASON=""; GROK_STATUS=""; ISSUES_JSON="[]"
