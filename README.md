@@ -8,6 +8,17 @@ Got AI credits about to expire? token-eater puts them to work.
 /token-eater
 ```
 
+## Install
+
+Two steps, from inside Claude Code:
+
+```
+/plugin marketplace add https://github.com/StartupBros-com/hov-marketplace.git
+/plugin install token-eater@hov
+```
+
+Then type `/token-eater` in any project you want cleaned up.
+
 The first time, it asks a couple of plain questions (what to clean up, which credits to spend) and remembers them — after that, `/token-eater` just runs. No flags to learn.
 
 ## How it works

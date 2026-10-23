@@ -3,7 +3,7 @@
 #
 # Vendors the best practices from the compound-engineering `ce-worktree`
 # (worktree-manager.sh) and `wt-sweep.sh` so token-eater is self-contained for
-# House of Vibe members who do not have those skills installed.
+# users who do not have those skills installed.
 #
 # Isolation: each chore runs in its own worktree on a branch cut from a COMMITTED
 # ref, so the user's main checkout (and any uncommitted WIP) is never touched and
@@ -43,9 +43,9 @@ cmd_create() {
   local wt="$repo/$WORKTREE_SUBDIR/te-${run_id}-${slug}"
 
   # keep the worktree dir AND the run-artifact dir out of the index (idempotent), so a
-  # member's `git add .` can never stage worktrees or run artifacts (prompt/schema/result/
+  # user's `git add .` can never stage worktrees or run artifacts (prompt/schema/result/
   # gate logs under .token-eater/runs/) into a chore PR. Written to .git/info/exclude, NOT
-  # .gitignore: appending to .gitignore dirtied the member's working tree — a direct
+  # .gitignore: appending to .gitignore dirtied the user's working tree — a direct
   # violation of "your checkout and uncommitted work are never touched". info/exclude lives
   # in the shared git dir, so it covers the main checkout AND every worktree, invisibly.
   local excl

@@ -15,33 +15,6 @@ is_uint() {
   [[ "$1" =~ ^(0|[1-9][0-9]*)$ ]]
 }
 
-notes_summary() {
-  # First paragraph only: the announcement summary should be the release's
-  # lead description, not flattened install blocks or changelog fragments.
-  printf '%s' "${RELEASE_NOTES:-}" | tr -d '\r' | awk 'BEGIN{RS=""} NR==1' | tr '\n' ' ' | cut -c1-600
-}
-
-announce() {
-  require ANNOUNCE_URL
-  require ANNOUNCE_SECRET
-  local payload
-  payload="$(jq -cn \
-    --arg operation announce \
-    --arg repository "$REPOSITORY" \
-    --arg releaseId "$RELEASE_ID" \
-    --arg tag "$RELEASE_TAG" \
-    --arg releaseName "$RELEASE_NAME" \
-    --arg releaseUrl "$RELEASE_URL" \
-    --arg notesSummary "$(notes_summary)" \
-    '{operation: $operation, repository: $repository, releaseId: $releaseId, tag: $tag, releaseName: $releaseName, releaseUrl: $releaseUrl} + (if $notesSummary == "" then {} else {notesSummary: $notesSummary} end)')"
-  curl --fail-with-body --silent --show-error \
-    -X POST \
-    -H 'content-type: application/json' \
-    -H "x-tool-release-announce-secret: $ANNOUNCE_SECRET" \
-    --data "$payload" \
-    "$ANNOUNCE_URL"
-}
-
 verify_release() {
   require SOURCE_ROOT
   require SOURCE_SHA
@@ -54,87 +27,34 @@ verify_release() {
   printf '%s\n' "$version"
 }
 
-current_release_id() {
-  jq -er --arg name "$REPOSITORY" '.plugins[] | select(.name == $name) | (.metadata.releaseId // 0)' "$MARKETPLACE_MANIFEST"
-}
-
-marketplace_matches_release() {
-  jq -e \
-    --arg name "$REPOSITORY" \
-    --arg sha "$SOURCE_SHA" \
-    --arg version "$RELEASE_VERSION" \
-    --argjson release_id "$RELEASE_ID" \
-    --arg release_tag "$RELEASE_TAG" \
-    'any(.plugins[]; .name == $name and .source.sha == $sha and .metadata.version == $version and .metadata.releaseId == $release_id and .metadata.releaseTag == $release_tag)' \
-    "$MARKETPLACE_MANIFEST" >/dev/null
-}
-
-apply_marketplace_entry() {
-  local output
-  output="$(mktemp)"
-  jq \
-    --arg name "$REPOSITORY" \
-    --arg sha "$SOURCE_SHA" \
-    --arg version "$RELEASE_VERSION" \
-    --argjson release_id "$RELEASE_ID" \
-    --arg release_tag "$RELEASE_TAG" \
-    '(.plugins[] | select(.name == $name)) |= (.source.sha = $sha | .metadata = {version: $version, releaseId: $release_id, releaseTag: $release_tag})' \
-    "$MARKETPLACE_MANIFEST" > "$output"
-  mv "$output" "$MARKETPLACE_MANIFEST"
-}
-
-validate_marketplace() {
-  BASE_REF="origin/$MARKETPLACE_BRANCH" \
-  EXPECTED_PLUGIN_NAME="$REPOSITORY" \
-  EXPECTED_PLUGIN_VERSION="$RELEASE_VERSION" \
-  EXPECTED_RELEASE_ID="$RELEASE_ID" \
-  EXPECTED_RELEASE_TAG="$RELEASE_TAG" \
-  EXPECTED_SHA="$SOURCE_SHA" \
-  "$MARKETPLACE_VALIDATOR" "${MARKETPLACE_VALIDATION_MODE:-syntax}"
-}
-
-prepare_marketplace() {
-  require MARKETPLACE_DIR
-  MARKETPLACE_BRANCH="${MARKETPLACE_BRANCH:-main}"
-  MARKETPLACE_MANIFEST="${MARKETPLACE_MANIFEST:-.claude-plugin/marketplace.json}"
-  MARKETPLACE_VALIDATOR="${MARKETPLACE_VALIDATOR:-./scripts/validate-marketplace.sh}"
-  cd "$MARKETPLACE_DIR"
-}
-
-promote() {
-  prepare_marketplace
-  git config user.name "hov-release-bot"
-  git config user.email "hov-release-bot@users.noreply.github.com"
-
-  local attempt current
-  for attempt in 1 2 3; do
-    git fetch origin "$MARKETPLACE_BRANCH" || fail 'could not fetch marketplace branch'
-    if ! git rebase "origin/$MARKETPLACE_BRANCH"; then
-      git rebase --abort || fail 'could not abort conflicted marketplace rebase'
-      git switch --detach "origin/$MARKETPLACE_BRANCH" || fail 'could not restore fresh marketplace tip'
-    fi
-    current="$(current_release_id)"
-    is_uint "$current" || fail 'marketplace release marker is not numeric'
-    if (( RELEASE_ID < current )); then
-      printf 'stale release %s is older than marketplace marker %s; no-op\n' "$RELEASE_ID" "$current"
-      return 2
-    fi
-    if (( RELEASE_ID == current )); then
-      marketplace_matches_release || fail "marketplace release $RELEASE_ID has immutable metadata drift"
-      printf 'release %s is already promoted\n' "$RELEASE_ID"
-      return 0
-    fi
-
-    apply_marketplace_entry
-    validate_marketplace
-    git add "$MARKETPLACE_MANIFEST"
-    git commit -m "chore: promote $REPOSITORY $RELEASE_TAG"
-    if git push origin "HEAD:$MARKETPLACE_BRANCH"; then
-      return 0
-    fi
-    printf 'promotion push attempt %s of 3 lost a race; retrying\n' "$attempt" >&2
-  done
-  fail 'marketplace promotion failed after exactly 3 attempts'
+# The marketplace card is updated by a REVIEWED repin PR, never by a push from
+# this job. Print the exact values that PR needs; a human or agent opens it.
+# Rationale: a standing deploy key able to write the distribution manifest is
+# the one credential whose compromise reaches every installed client, and a
+# direct bot push cannot satisfy required status checks anyway (proved when
+# hov-marketplace gained require-ci: pro-gate v0.31.2 had to be promoted by
+# hand as hov-marketplace PR #70).
+emit_repin_request() {
+  printf '\n=== marketplace repin needed ===\n'
+  printf '  plugin      %s\n' "$REPOSITORY"
+  printf '  version     %s\n' "$RELEASE_VERSION"
+  printf '  sha         %s\n' "$SOURCE_SHA"
+  printf '  releaseId   %s\n' "$RELEASE_ID"
+  printf '  releaseTag  %s\n' "$RELEASE_TAG"
+  printf '\nOpen the repin PR against StartupBros-com/hov-marketplace, then\n'
+  printf 'edit this release to re-fire the announce once the card is merged.\n'
+  printf 'Recipe: hov-marketplace/docs/plugin-release-recipe.md\n\n'
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    {
+      printf '### Marketplace repin needed\n\n'
+      printf '| field | value |\n|---|---|\n'
+      printf '| plugin | `%s` |\n' "$REPOSITORY"
+      printf '| version | `%s` |\n' "$RELEASE_VERSION"
+      printf '| sha | `%s` |\n' "$SOURCE_SHA"
+      printf '| releaseId | `%s` |\n' "$RELEASE_ID"
+      printf '| releaseTag | `%s` |\n' "$RELEASE_TAG"
+    } >> "$GITHUB_STEP_SUMMARY"
+  fi
 }
 
 main() {
@@ -142,8 +62,6 @@ main() {
   require REPOSITORY
   require RELEASE_ID
   require RELEASE_TAG
-  require RELEASE_NAME
-  require RELEASE_URL
   is_uint "$RELEASE_ID" || fail 'RELEASE_ID must be an unsigned integer'
   [[ "$REPOSITORY" == token-eater ]] || fail 'this release train only promotes token-eater'
 
@@ -161,28 +79,7 @@ main() {
   fi
 
   RELEASE_VERSION="$(verify_release)"
-  if [[ "$EVENT_ACTION" == edited ]]; then
-    prepare_marketplace
-    git fetch origin "$MARKETPLACE_BRANCH" || fail 'could not fetch marketplace branch'
-    git rebase "origin/$MARKETPLACE_BRANCH" || fail 'could not synchronize marketplace for edited release'
-    local current
-    current="$(current_release_id)"
-    is_uint "$current" || fail 'marketplace release marker is not numeric'
-    if (( RELEASE_ID == current )); then
-      marketplace_matches_release || fail "marketplace release $RELEASE_ID does not match the edited release tuple"
-      announce
-      return
-    fi
-    (( RELEASE_ID > current )) || fail "edited release $RELEASE_ID is older than marketplace marker $current"
-    cd "$SOURCE_ROOT"
-  fi
-
-  if promote; then
-    announce
-  else
-    local status=$?
-    [[ "$status" == 2 ]] || return "$status"
-  fi
+  emit_repin_request
 }
 
 main "$@"

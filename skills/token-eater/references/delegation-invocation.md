@@ -73,9 +73,9 @@ Use the exit code, and keep the printed message for the run summary or `issues[]
 | --- | --- | --- |
 | `0` | `ready` | Proceed to the headless-contract preflight. |
 | `3` | `needs-reauth` | Park this service for the run with the printed plain-language message and move to the next service in your list; if none remains, stop. Never invoke a CLI that could hang on interactive sign-in. |
-| `2` | `unknown` | Proceed, but add the printed risk message to `issues[]` so the member can see what was uncertain. |
+| `2` | `unknown` | Proceed, but add the printed risk message to `issues[]` so the user can see what was uncertain. |
 
-Example `needs-reauth` message for Grok: "Open a terminal, run `grok`, sign in, then run token-eater again." Keep this wording plain; House of Vibe members should not need to understand OAuth, tokens, or adapter internals.
+Example `needs-reauth` message for Grok: "Open a terminal, run `grok`, sign in, then run token-eater again." Keep this wording plain; users should not need to understand OAuth, tokens, or adapter internals.
 
 This preflight is per adapter per run. Cache the outcome in provider state so one uncertain adapter does not repeat the same check before every chore.
 
