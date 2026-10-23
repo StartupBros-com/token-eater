@@ -536,12 +536,15 @@ PR_TITLE="$(git -C "$WORKTREE" log --reverse --format='%s' "$_RANGE" 2>/dev/null
 [ -n "$PR_TITLE" ] || PR_TITLE="$SKILL: automated maintenance pass"
 if [ "$GATE_TIER" = soft ]; then _gate_line="no automated gate - **AI-reviewed only**"; else _gate_line="gate \`$GATE\` (independently re-verified green by token-eater)"; fi
 
+# Keep new-PR and existing-PR safety wording identical.
+SOFT_GATE_BANNER='> [!WARNING]
+> **This project has no automated tests/typecheck, so token-eater could not machine-verify this change.** An AI review ran, but nothing here proves it was thorough. **Read the diff carefully before merging.**'
+
 PR_BODY_FILE="$LOG/pr-body.md"
 {
   # (1) soft-tier banner - engine-owned safety flag, always first
   if [ "$GATE_TIER" = soft ]; then
-    printf '> [!WARNING]\n'
-    printf '> **This project has no automated tests/typecheck, so token-eater could not machine-verify this change.** An AI review ran, but nothing here proves it was thorough. **Read the diff carefully before merging.**\n\n'
+    printf '%s\n\n' "$SOFT_GATE_BANNER"
   fi
   # (2) the narrative - service-authored if present, else a minimal honest stub
   if [ -s "$SERVICE_PR_BODY" ]; then
@@ -572,8 +575,7 @@ elif [ "$GATE_TIER" = soft ]; then
   _cur="$(gh pr view "$PR_URL" --repo "$ORIGIN_SLUG" --json body --jq '.body' 2>/dev/null || true)"
   case "$_cur" in
     *"could not machine-verify this change"*) : ;;   # banner already present - leave the body as-is
-    *) gh pr edit "$PR_URL" --repo "$ORIGIN_SLUG" --body "> [!WARNING]
-> **This project has no automated tests/typecheck, so token-eater could not machine-verify this change.** An AI review ran, but nothing here proves it was thorough. **Read the diff carefully before merging.**
+    *) gh pr edit "$PR_URL" --repo "$ORIGIN_SLUG" --body "$SOFT_GATE_BANNER
 
 $_cur" >/dev/null 2>&1 || true ;;
   esac

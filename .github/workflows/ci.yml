@@ -35,6 +35,7 @@ jobs:
 
       - name: Test shell scripts
         run: |
+          python3 tests/session-banner.test.py
           bash tests/consent-preflight.sh
           bash tests/release-train.test.sh
           bash tests/workflows.test.sh
