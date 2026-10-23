@@ -38,3 +38,4 @@ jobs:
           bash tests/consent-preflight.sh
           bash tests/release-train.test.sh
           bash tests/workflows.test.sh
+          python3 tests/delegate-scope.test.py

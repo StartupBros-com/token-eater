@@ -13,6 +13,9 @@
 # Emits a JSON object on stdout. Exit codes (same contract as delegate-grok.sh):
 #   0 ok   2 invoke-error   3 circuit-breaker (park)   4 scope-violation (rollback)
 set -euo pipefail
+
+# shellcheck source=skills/token-eater/scripts/lib/delegate-common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/delegate-common.sh"
 export TOKEN_EATER_DELEGATED=1   # marker so a worker that re-invokes token-eater is refused (recursion guard)
 
 WT="${1:?worktree dir required}"
@@ -65,15 +68,7 @@ if ! { command -v jq >/dev/null && jq -e . "$ENV" >/dev/null 2>&1; }; then
 fi
 
 # --- ground truth: what changed in the worktree ---
-CHANGED=(); while IFS= read -r _c; do CHANGED+=("$_c"); done < <(cd "$WT" && { git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u | grep -v '^$' | while IFS= read -r f; do [ -L "$f" ] || printf '%s\n' "$f"; done)   # mapfile is bash 4+ (absent on macOS bash 3.2)
-MADE_CHANGES=false; [ "${#CHANGED[@]}" -gt 0 ] && MADE_CHANGES=true
-
-SCOPE_VIOLATION=false; OFFENDERS=()
-if [ -n "$ALLOWED" ] && [ -f "$ALLOWED" ] && [ "$MADE_CHANGES" = true ]; then
-  for f in "${CHANGED[@]}"; do
-    grep -qxF "$f" "$ALLOWED" || { SCOPE_VIOLATION=true; OFFENDERS+=("$f"); }
-  done
-fi
+delegate_collect_changes_and_scope "$WT" "$ALLOWED"
 
 # --- claude self-report from .structured_output (reliable) + spend from envelope ---
 SELF_STATUS="$(jq -r '.structured_output.status // ""' "$ENV")"
